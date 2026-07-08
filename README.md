@@ -4,10 +4,15 @@
 
 It is designed to work with Codex, Claude Code, Cursor, Cline, OpenCode, or any agent harness that can load `SKILL.md`-style instructions or plain Markdown guidance.
 
+## Philosophy
+
+Failure is not error — repeated attempts on a novel problem are legitimate exploration. The waste this skill targets is solving the **same** problem twice: struggling through a failure loop that a past session already resolved, because the lesson was never captured or never recalled. So it distinguishes two modes: on a **known problem** (a stored lesson covers the failure signature), recall and follow the lesson before the next attempt; on a **novel problem**, explore freely — just never retry verbatim — and capture the lesson automatically after solving it.
+
 ## What It Does
 
-- Detect retry loops and repeated fallback behavior.
-- Force an evidence checkpoint before more tool switching.
+- Capture lessons automatically after a hard-won success (two or more failed attempts, non-obvious workaround, machine-specific fact) — the primary mode.
+- Check memory for a prior lesson before re-deriving a fix, and classify the problem as known or novel.
+- Detect verbatim retry loops and force an evidence checkpoint before more tool switching.
 - Add explicit failure gates before broad discovery.
 - Capture only verified, reusable lessons.
 - Route lessons to user memory, project memory, or skill updates.

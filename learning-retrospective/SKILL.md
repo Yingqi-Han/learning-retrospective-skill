@@ -1,11 +1,22 @@
 ---
 name: learning-retrospective
-description: Use when you have repeated the same failed action twice, switched tools without new evidence, rediscovered a verified local fact, or the user asks for a retrospective or lesson to prevent future retry loops — including Chinese requests such as 复盘, 总结教训, 吸取教训, 记住这个坑, 避免重复踩坑, 别再重复试错, 别再瞎试. Do not use for ordinary first-pass debugging, general memory notes, pure explanation, summarization, translation, or writing tasks.
+description: Use when a task just succeeded after multiple failed attempts or a non-obvious workaround (capture the lesson), when you are re-encountering a problem that a stored lesson already covers, when you have repeated the same failed action verbatim, or when the user asks for a retrospective or lesson — including Chinese requests such as 复盘, 总结经验, 总结教训, 吸取教训, 记住这个坑, 避免重复踩坑, 别再重复试错. Do not use for ordinary first-pass debugging of a novel problem, general memory notes, pure explanation, summarization, translation, or writing tasks.
 ---
 
 # Learning Retrospective
 
-Use this skill to stop repeated trial-and-error and turn verified lessons into durable context for future agents. Keep the main task moving; the retrospective should be a short control loop, not a new project.
+Use this skill to turn verified lessons into durable context for future agents, so a problem solved once is never re-solved by trial-and-error. Keep the main task moving; the retrospective should be a short control loop, not a new project.
+
+Failure is not error. Repeated attempts on a **novel** problem are legitimate exploration and must not be suppressed — the only discipline a novel problem needs is no verbatim retries and one explicit hypothesis per attempt. The behavior this skill exists to eliminate is different: struggling through the **same** problem a second time because the first solution was never captured, or was captured but not recalled. So the skill has two modes with different strengths:
+
+- **Known problem** (a stored lesson or memory covers this failure signature): intervene early — recall the lesson before the next attempt and follow it.
+- **Novel problem** (no prior lesson): do not interrupt exploration. Vary the approach instead of retrying verbatim, solve it, then capture the lesson afterward.
+
+## Post-Resolution Capture
+
+This is the primary automatic mode. After a task succeeds, check one question before ending the turn: did getting here involve two or more failed attempts, a non-obvious workaround, a machine-specific fact, or an order of operations that a future agent would have to rediscover? If yes, run steps 5–6 of the Workflow (capture the lesson, store it in the right surface, subject to the Write Permission Gate). If no, end normally — do not manufacture lessons out of routine work.
+
+The capture must happen while the evidence is still in context: exact commands, exact error text, what was tried and why it failed. A lesson written from memory of the struggle is worth less than one written from the transcript of it.
 
 ## Loop Signals
 
@@ -42,13 +53,14 @@ Before writing to user memory, repository docs, project rules, or another skill:
 ## Workflow
 
 1. Pause the loop.
-   - Stop broad search, repeated fallback attempts, and speculative edits.
+   - Stop verbatim retries, broad unfocused search, and speculative edits.
    - State the immediate goal, the last failing action, and the exact error or symptom.
    - Preserve any running process or user data before changing course.
 
-2. Rebuild the evidence.
+2. Rebuild the evidence — and classify the problem.
+   - Search existing memory and project guidance for this failure signature first. If a prior lesson covers it, this is a known problem: follow the lesson instead of re-deriving it.
+   - If nothing covers it, this is a novel problem: continue exploring with varied hypotheses, and plan to capture the lesson after resolution.
    - List what is already verified, including paths, versions, commands, outputs, and files.
-   - Search existing memory or project guidance before asking the user to repeat context.
    - Prefer cheap verification of drift-prone facts over assumptions.
 
 3. Choose one next hypothesis.

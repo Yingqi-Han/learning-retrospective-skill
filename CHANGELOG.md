@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0 - 2026-07-09
+
+- Reframe the skill around its real target: solving the same problem twice. Failure on a novel problem is legitimate exploration and is no longer treated as a signal to interrupt; the only discipline imposed on novel problems is no verbatim retries and one explicit hypothesis per attempt.
+- Add Post-Resolution Capture as the primary automatic mode: after a success that took two or more failed attempts or a non-obvious workaround, capture the lesson while the evidence is still in context.
+- Add a known-vs-novel classification step to the workflow: search memory for the failure signature first; a covered failure is a known problem (follow the lesson), an uncovered one is novel (explore, then capture).
+- Reword the hook reminder accordingly: "check memory for a prior lesson; if none, keep exploring with a changed hypothesis and capture the lesson after solving" instead of "stop retrying".
+- Update the trigger description to include post-success capture and 总结经验.
+
 ## 0.3.2 - 2026-07-09
 
 - Add a Codex hook-activation section: Codex now supports lifecycle hooks (`~/.codex/hooks.json` or inline `[hooks]` in `config.toml`), so the previous "instruction-level fallback only" advice for Codex was outdated. Key differences documented: no failure-specific event (branch on `tool_response.exit_code` in one `PostToolUse` script), handler `command` is a string with optional `commandWindows`, and non-managed hooks require one-time user trust via `/hooks` before they run.

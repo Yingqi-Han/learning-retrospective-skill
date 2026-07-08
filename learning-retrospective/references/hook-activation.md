@@ -6,7 +6,9 @@ The pattern is harness-agnostic:
 
 1. Observe tool executions (command, success/failure).
 2. Keep a small rolling state of recent failures.
-3. When the same action fails twice, inject a reminder into the agent's context to stop and invoke this skill.
+3. When the same action fails twice **verbatim**, inject a reminder into the agent's context.
+
+Calibrate the reminder to the skill's two modes — it must not suppress legitimate exploration of a novel problem. Verbatim-identical retries are the one behavior that is almost never productive, which is why they are the trigger; but the injected message should say "check memory for a prior lesson; if none, keep exploring with a changed hypothesis and capture the lesson after solving," not "stop working on this."
 
 ## Claude Code Example (tested 2026-07-09)
 
@@ -64,10 +66,13 @@ if state.get(key, 0) >= THRESHOLD:
             "hookEventName": event,
             "additionalContext": (
                 f"Retry-loop detector: this exact command has now failed "
-                f"{state[key]} times in this session. Stop retrying it "
-                "verbatim. Invoke the learning-retrospective skill: state the "
-                "verified facts, form one hypothesis with an explicit failure "
-                "gate, and capture the lesson if it is reusable."
+                f"{state[key]} times in this session. Do not run it again "
+                "unchanged. First check stored lessons/memory for this "
+                "failure signature: if a prior lesson covers it, follow that "
+                "lesson. If none exists, this is a novel problem - keep "
+                "exploring, but with a changed hypothesis, and capture the "
+                "lesson via the learning-retrospective skill after you solve "
+                "it."
             ),
         }
     }))
