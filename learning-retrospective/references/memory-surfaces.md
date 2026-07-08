@@ -15,9 +15,11 @@ Use for facts that apply across projects on one machine or to one user's prefere
 Examples:
 
 - Codex: user memory folder, local skills, or persistent instructions if available.
-- Claude Code: `CLAUDE.md`, `~/.claude/memory/`, or user-level skills if configured.
+- Claude Code: per-project memory at `~/.claude/projects/<project-slug>/memory/` — one fact per file with YAML frontmatter (`name`, `description`, `metadata.type`), indexed by a one-line entry in that directory's `MEMORY.md`; `~/.claude/CLAUDE.md` for user-global instructions; `~/.claude/skills/` for user-level skills.
 - Cursor/Cline/OpenCode: memory bank, rules files, notes, or custom instruction files supported by the tool.
 - Generic: `~/agent-memory/`, `~/.config/<agent>/memory/`, or a user-maintained markdown knowledge base.
+
+Note for Claude Code: when writing a lesson as a memory file, use the harness's native frontmatter format rather than the raw Lesson Template — put the trigger into `description:` (that field drives recall) and the template body below the frontmatter.
 
 ## Project-Level Memory
 

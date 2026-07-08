@@ -1,6 +1,6 @@
 ---
 name: learning-retrospective
-description: Use when an AI coding or file-processing agent has repeated the same failed action twice, switched tools without new evidence, rediscovered a verified local fact, or the user explicitly asks for a retrospective or lesson to prevent future retry loops. Do not use for ordinary first-pass debugging, general memory notes, pure explanation, summarization, translation, or writing tasks.
+description: Use when you have repeated the same failed action twice, switched tools without new evidence, rediscovered a verified local fact, or the user asks for a retrospective or lesson to prevent future retry loops — including Chinese requests such as 复盘, 总结教训, 吸取教训, 记住这个坑, 避免重复踩坑, 别再重复试错, 别再瞎试. Do not use for ordinary first-pass debugging, general memory notes, pure explanation, summarization, translation, or writing tasks.
 ---
 
 # Learning Retrospective
@@ -82,6 +82,10 @@ Before writing to user memory, repository docs, project rules, or another skill:
    - If no subagent exists, run the same checklist yourself.
    - See `references/reviewer-prompt.md`.
 
+## Automatic Activation
+
+This skill is normally recalled through its description, which is weakest exactly when an agent is mid-loop. If your harness supports hooks or tool-event callbacks, wire a repeated-failure detector that injects a reminder to invoke this skill. See `references/hook-activation.md` for a Claude Code example and the general pattern for other harnesses.
+
 ## Examples
 
 Use examples as anchors for trigger and execution behavior:
@@ -90,6 +94,7 @@ Use examples as anchors for trigger and execution behavior:
 - `examples/github-actions-loop.md`
 - `examples/docx-conversion-loop.md`
 - `examples/zotero-linked-attachment-loop.md`
+- `examples/dependency-install-loop.md`
 
 ## Lesson Template
 

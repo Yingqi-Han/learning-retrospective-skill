@@ -12,6 +12,7 @@ It is designed to work with Codex, Claude Code, Cursor, Cline, OpenCode, or any 
 - Capture only verified, reusable lessons.
 - Route lessons to user memory, project memory, or skill updates.
 - Optionally ask any available secondary reviewer or agent for a bounded audit.
+- Optionally activate automatically via harness hooks that detect repeated failures (see `learning-retrospective/references/hook-activation.md`).
 
 ## Install
 
@@ -45,7 +46,7 @@ If your agent does not support skill folders, paste `SKILL.md` into its custom i
 | Agent | Tested | Install surface | Notes |
 |---|---:|---|---|
 | Codex | yes, structure validated | `~/.codex/skills/` | Uses `SKILL.md` frontmatter and optional `agents/openai.yaml`. |
-| Claude Code | not yet | `~/.claude/skills/` or project guidance | May need manual confirmation of local skill discovery behavior. |
+| Claude Code | yes, deployed and discovered (2026-07-09) | `~/.claude/skills/` | Copy the folder; the skill is discovered live from `SKILL.md` frontmatter, no restart needed. `agents/openai.yaml` is ignored. |
 | Cursor | not yet | rules or custom instructions | Paste `SKILL.md`; load references manually as needed. |
 | Cline | not yet | `.clinerules` or memory bank | Use as plain Markdown workflow guidance if skill folders are unavailable. |
 | OpenCode | not yet | custom skill or instruction folder | Use the same `SKILL.md` plus references pattern if supported. |
@@ -65,6 +66,7 @@ The `examples/` directory contains concrete loop patterns:
 - GitHub Actions retry loop
 - DOCX conversion loop
 - Zotero linked attachment loop
+- Dependency install loop
 
 ## Positioning
 
