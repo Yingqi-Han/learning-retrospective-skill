@@ -1,0 +1,6 @@
+interface:
+  display_name: "Learning Retrospective"
+  short_description: "Break retry loops and preserve reusable agent lessons."
+  default_prompt: "Use $learning-retrospective to stop repeated trial-and-error, extract the lesson, and update the right memory surface."
+policy:
+  allow_implicit_invocation: true
