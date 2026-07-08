@@ -1,6 +1,6 @@
 ---
 name: learning-retrospective
-description: Agent-agnostic loop breaker and lesson-capture workflow. Use when an AI coding agent is repeating failed attempts, rediscovering known local facts, switching tools without new evidence, hitting the same error multiple times, or when the user asks the agent to learn from mistakes, create a retrospective, update memory, avoid future retry loops, or make the workflow portable across Codex, Claude Code, Cursor, Cline, OpenCode, or other agent harnesses.
+description: Use when an AI coding or file-processing agent has repeated the same failed action twice, switched tools without new evidence, rediscovered a verified local fact, or the user explicitly asks for a retrospective or lesson to prevent future retry loops. Do not use for ordinary first-pass debugging, general memory notes, pure explanation, summarization, translation, or writing tasks.
 ---
 
 # Learning Retrospective
@@ -19,6 +19,25 @@ Trigger a retrospective when one or more signals appear:
 - A failure was resolved by a non-obvious command, local workaround, or order of operations.
 
 Do not run this workflow for every small error. Use it when the lesson is reusable or the current behavior is starting to waste time.
+
+## Non-Triggers
+
+Do not invoke this skill for:
+
+- A first-time ordinary error with an obvious next fix.
+- Normal debugging where each attempt produces new evidence.
+- Pure explanation, summarization, translation, or writing tasks.
+- Broad project review unless a repeated failure pattern has already appeared.
+- Memory updates requested by the user that do not involve a workflow lesson.
+
+## Write Permission Gate
+
+Before writing to user memory, repository docs, project rules, or another skill:
+
+- If the user explicitly asked to save, update, or write the lesson, proceed.
+- Otherwise, present the proposed lesson and target surface first.
+- Never modify project instructions, skills, or persistent memory silently.
+- Never store secrets, tokens, credentials, cookies, private data, or long raw logs.
 
 ## Workflow
 
@@ -49,6 +68,7 @@ Do not run this workflow for every small error. Use it when the lesson is reusab
    - Prefer one small memory update over a large narrative.
 
 6. Store it in the right surface.
+   - Pass the Write Permission Gate before making persistent edits.
    - Use user-level memory for cross-project machine or preference facts.
    - Use repo/project docs for project-specific conventions.
    - Update an existing skill only when the lesson changes a reusable procedure.
@@ -61,6 +81,15 @@ Do not run this workflow for every small error. Use it when the lesson is reusab
    - Ask for the smallest safety or clarity improvement.
    - If no subagent exists, run the same checklist yourself.
    - See `references/reviewer-prompt.md`.
+
+## Examples
+
+Use examples as anchors for trigger and execution behavior:
+
+- `examples/pdf-rendering-loop.md`
+- `examples/github-actions-loop.md`
+- `examples/docx-conversion-loop.md`
+- `examples/zotero-linked-attachment-loop.md`
 
 ## Lesson Template
 
