@@ -84,7 +84,7 @@ Before writing to user memory, repository docs, project rules, or another skill:
 
 ## Automatic Activation
 
-This skill is normally recalled through its description, which is weakest exactly when an agent is mid-loop. If your harness supports hooks or tool-event callbacks, wire a repeated-failure detector that injects a reminder to invoke this skill. See `references/hook-activation.md` for a Claude Code example and the general pattern for other harnesses.
+This skill is normally recalled through its description, which is weakest exactly when an agent is mid-loop. If your harness supports hooks or tool-event callbacks, wire a repeated-failure detector that injects a reminder to invoke this skill. See `references/hook-activation.md` for a tested Claude Code detector and the general pattern for other harnesses. Treat any hook config you write as an artifact under this skill's own rules: pipe-test it with synthetic input, then force one real failure to prove it fires, before trusting it.
 
 ## Examples
 

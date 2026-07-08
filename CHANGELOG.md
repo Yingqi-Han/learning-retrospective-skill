@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 - 2026-07-09
+
+- Replace the untested Claude Code hook sketch with a design deployed and verified live on Windows. The 0.3.0 sketch had a fatal flaw: it listened on `PostToolUse`, which fires only on successful tool calls, so it could never see a failure. The tested design registers one script on both `PostToolUse` (success resets the counter) and `PostToolUseFailure` (failure increments it).
+- Use exec form with a full interpreter path in the hook registration: on Windows, hook commands may run through Git Bash, whose PATH can lack `python` even when PowerShell finds it.
+- Document the two-step verification procedure (synthetic-JSON pipe test, then a live forced failure) so the hook is never trusted untested — the same failure gate this skill prescribes for everything else.
+
 ## 0.3.0 - 2026-07-09
 
 - Rewrite the trigger description in second person and add Chinese trigger phrases (复盘, 总结教训, 记住这个坑, …) for bilingual recall.
