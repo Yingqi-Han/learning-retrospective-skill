@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.2 - 2026-07-09
+
+- Extend `SECURITY_NOTES.md` for the hook era: hooks are executable local code (never auto-installed without explicit approval, full interpreter paths, re-review after edits), and lessons are privileged writes — never capture a lesson sourced solely from untrusted content (memory-poisoning defense), scrub secrets from commands and error text before capture.
+- Downgrade the Codex `tool_response.exit_code` claim from schema fact to empirically observed shape: the generated hook schema leaves `tool_response` unconstrained, so the detector must be re-tested after Codex upgrades (it fails safe if the field disappears).
+- Add `Validation Evidence`, `Drift Risk`, and `Last Verified` fields to the Lesson Template so stale lessons are not treated as hard rules.
+- Add a filled, completed lesson example (`examples/filled-lesson-libreoffice.md`) alongside the pattern examples.
+- Pin compatibility claims to environment and date (Windows 11, Codex desktop 26.6xx, 2026-07-09).
+- Document trigger-phrase localization: the repo `SKILL.md` stays ASCII for validator portability; users should append native-language trigger words to their installed copy when their harness handles UTF-8.
+
 ## 0.4.1 - 2026-07-09
 
 - Keep `learning-retrospective/SKILL.md` ASCII-only so the existing Windows `quick_validate.py` path works even when Python defaults to a non-UTF-8 locale.

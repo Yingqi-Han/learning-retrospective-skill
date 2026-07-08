@@ -107,6 +107,7 @@ Use examples as anchors for trigger and execution behavior:
 - `examples/docx-conversion-loop.md`
 - `examples/zotero-linked-attachment-loop.md`
 - `examples/dependency-install-loop.md`
+- `examples/filled-lesson-libreoffice.md` (a completed lesson, not a pattern)
 
 ## Lesson Template
 
@@ -126,6 +127,15 @@ Use examples as anchors for trigger and execution behavior:
 1. First command/check.
 2. Validation gate.
 3. Fallback only if the gate fails.
+
+## Validation Evidence
+- The exact command and observed output that proved the preferred procedure works.
+
+## Drift Risk
+- What may invalidate this lesson: version, path, API shape, account state, OS, permissions.
+
+## Last Verified
+- YYYY-MM-DD
 
 ## Scope
 - Applies to: <machine/project/tool/context>

@@ -128,7 +128,7 @@ Notes:
 
 Codex supports lifecycle hooks in `~/.codex/hooks.json` (or inline `[hooks]` tables in `config.toml`). Three differences from Claude Code, verified against the official docs and the codex repo:
 
-- There is no failure-specific event ([openai/codex#24907](https://github.com/openai/codex/issues/24907) requests one). `PostToolUse` fires for both success and non-zero exits, and `tool_response` carries `output` and `exit_code` — branch on `exit_code` inside one script instead of registering two events.
+- There is no failure-specific event ([openai/codex#24907](https://github.com/openai/codex/issues/24907) requests one). `PostToolUse` fires for both success and non-zero exits, so branch on the exit code inside one script instead of registering two events. Note the epistemic status: in currently observed Codex builds `tool_response` for Bash includes `output` and `exit_code`, but the generated hook schema leaves `tool_response` unconstrained — this field shape is empirical, not guaranteed. Re-run the pipe test and one live forced failure after Codex upgrades; the script below already fails safe (missing exit code is treated as success, so a renamed field silently disables detection rather than spamming false reminders).
 - The handler `command` is a single string (no exec-form `args` array); use `commandWindows` for a Windows-specific override, and full interpreter paths for the same PATH reasons as on Claude Code.
 - Non-managed hooks do not run until the user reviews and trusts them via `/hooks` inside Codex. Installing the files is not enough — tell the user about this step, and re-approve after any edit to the hook definition.
 

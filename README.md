@@ -46,12 +46,16 @@ cp -r ./learning-retrospective ./.agent-skills/
 
 If your agent does not support skill folders, paste `SKILL.md` into its custom instructions and load the reference files when needed.
 
+### Localization of trigger phrases
+
+The repository copy of `SKILL.md` is ASCII-only because at least one skill validator (Codex `quick_validate.py` on Windows) reads files with the locale default encoding and crashes on non-ASCII bytes under a GBK locale. If you interact with your agent in another language and your harness handles UTF-8 (Claude Code does), append native-language trigger phrases to the `description:` line of your **installed** copy — description-based recall improves markedly when the trigger words match the language you actually type. Example additions for Chinese: 复盘, 总结经验, 记住这个坑, 避免重复踩坑.
+
 ## Compatibility
 
 | Agent | Tested | Install surface | Notes |
 |---|---:|---|---|
-| Codex | yes, structure validated and subagent-tested (2026-07-09) | `~/.codex/skills/` | Uses `SKILL.md` frontmatter and optional `agents/openai.yaml`; keep `SKILL.md` ASCII-only for Windows validator compatibility. |
-| Claude Code | yes, deployed and discovered (2026-07-09) | `~/.claude/skills/` | Copy the folder; the skill is discovered live from `SKILL.md` frontmatter, no restart needed. `agents/openai.yaml` is ignored. Hook-based auto-activation also tested — see `references/hook-activation.md`. |
+| Codex | yes, structure validated and subagent-tested (Windows 11, Codex desktop app 26.6xx, 2026-07-09) | `~/.codex/skills/` | Uses `SKILL.md` frontmatter and optional `agents/openai.yaml`; keep `SKILL.md` ASCII-only for Windows validator compatibility. Hook config pipe-tested; hook field shapes are empirical, re-test after upgrades. |
+| Claude Code | yes, deployed and discovered (Windows 11, 2026-07-09) | `~/.claude/skills/` | Copy the folder; the skill is discovered live from `SKILL.md` frontmatter, no restart needed. `agents/openai.yaml` is ignored. Hook-based auto-activation verified live same date — see `references/hook-activation.md`. |
 | Cursor | not yet | rules or custom instructions | Paste `SKILL.md`; load references manually as needed. |
 | Cline | not yet | `.clinerules` or memory bank | Use as plain Markdown workflow guidance if skill folders are unavailable. |
 | OpenCode | not yet | custom skill or instruction folder | Use the same `SKILL.md` plus references pattern if supported. |
@@ -72,6 +76,7 @@ The `examples/` directory contains concrete loop patterns:
 - DOCX conversion loop
 - Zotero linked attachment loop
 - Dependency install loop
+- A filled, completed lesson (LibreOffice conversion) showing what capture output should look like
 
 ## Positioning
 
