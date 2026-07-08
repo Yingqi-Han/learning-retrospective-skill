@@ -8,48 +8,72 @@ The pattern is harness-agnostic:
 2. Keep a small rolling state of recent failures.
 3. When the same action fails twice, inject a reminder into the agent's context to stop and invoke this skill.
 
-## Claude Code Example
+## Claude Code Example (tested 2026-07-09)
 
-Claude Code supports `PostToolUse` hooks that receive tool call details as JSON on stdin and can inject `additionalContext` back into the conversation.
+This design was deployed and verified end-to-end on a real machine: on the second identical Bash failure, the reminder was injected into the model's context as a system reminder.
 
-`~/.claude/hooks/retry-loop-detector.py` (sketch — adapt field names to your Claude Code version):
+Two verified facts shaped the design:
+
+- `PostToolUse` fires only on **successful** tool calls; failures fire `PostToolUseFailure`. A single-event heuristic that parses `tool_response` for error strings never sees real failures. Register the same script on **both** events: failure increments the counter, success resets it — no fragile output parsing needed.
+- On Windows, hook commands may run through Git Bash, whose PATH can lack `python` even when PowerShell finds it. Use the exec form (`command` + `args`, no shell) with the interpreter's full path.
+
+`~/.claude/hooks/retry-loop-detector.py`:
 
 ```python
-import json, sys, hashlib, os, tempfile
+import hashlib, json, os, sys, tempfile
 
-data = json.load(sys.stdin)
+THRESHOLD = 2
+
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+
 if data.get("tool_name") != "Bash":
     sys.exit(0)
 
-command = data.get("tool_input", {}).get("command", "")
-response = json.dumps(data.get("tool_response", ""))
-failed = any(k in response for k in ("Exit code 1", "\"is_error\": true", "command not found", "No such file"))
+event = data.get("hook_event_name", "")
+command = ((data.get("tool_input") or {}).get("command") or "").strip()
+if not command:
+    sys.exit(0)
 
-state_path = os.path.join(tempfile.gettempdir(), "claude-retry-loop-state.json")
+session = (data.get("session_id") or "global")[:16]
+key = hashlib.sha1(command.encode("utf-8", "replace")).hexdigest()[:12]
+state_path = os.path.join(tempfile.gettempdir(), f"claude-retry-loop-{session}.json")
+
 try:
-    state = json.load(open(state_path))
+    with open(state_path, encoding="utf-8") as f:
+        state = json.load(f)
 except Exception:
     state = {}
 
-key = hashlib.sha1(command.encode()).hexdigest()[:12]
-state[key] = state.get(key, 0) + 1 if failed else 0
-json.dump(state, open(state_path, "w"))
+if event == "PostToolUseFailure":
+    state[key] = state.get(key, 0) + 1
+else:
+    state.pop(key, None)
 
-if failed and state[key] >= 2:
+try:
+    with open(state_path, "w", encoding="utf-8") as f:
+        json.dump(state, f)
+except Exception:
+    pass
+
+if state.get(key, 0) >= THRESHOLD:
     print(json.dumps({
         "hookSpecificOutput": {
-            "hookEventName": "PostToolUse",
+            "hookEventName": event,
             "additionalContext": (
-                "The same command has now failed "
-                f"{state[key]} times. Stop retrying. Invoke the "
-                "learning-retrospective skill: state the verified facts, "
-                "pick one hypothesis with a failure gate, and capture the lesson."
+                f"Retry-loop detector: this exact command has now failed "
+                f"{state[key]} times in this session. Stop retrying it "
+                "verbatim. Invoke the learning-retrospective skill: state the "
+                "verified facts, form one hypothesis with an explicit failure "
+                "gate, and capture the lesson if it is reusable."
             ),
         }
     }))
 ```
 
-Register it in `~/.claude/settings.json`:
+Register it in `~/.claude/settings.json` (exec form; substitute your interpreter path):
 
 ```json
 {
@@ -58,7 +82,25 @@ Register it in `~/.claude/settings.json`:
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "python ~/.claude/hooks/retry-loop-detector.py" }
+          {
+            "type": "command",
+            "command": "C:\\path\\to\\python.exe",
+            "args": ["C:\\Users\\<user>\\.claude\\hooks\\retry-loop-detector.py"],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:\\path\\to\\python.exe",
+            "args": ["C:\\Users\\<user>\\.claude\\hooks\\retry-loop-detector.py"],
+            "timeout": 10
+          }
         ]
       }
     ]
@@ -66,11 +108,16 @@ Register it in `~/.claude/settings.json`:
 }
 ```
 
+Verification procedure (do this once before trusting it):
+
+1. Pipe-test the script with synthetic JSON for fail #1 (no output), fail #2 (reminder emitted), success (reset).
+2. Run one harmless failing command twice in a live session and confirm the reminder appears.
+
 Notes:
 
-- The failure heuristic above is deliberately crude; tune it to the tool-response shape your version emits, and verify with one forced failure before trusting it.
+- Detection is exact-command-match only; paraphrased retries of the same broken approach are not caught — that remains the skill's job once activated.
 - Keep the injected reminder short. Its only job is to break the loop and hand control to the skill.
-- Scope the state file per session if parallel sessions are common.
+- The state file is scoped per session id, so parallel sessions do not interfere.
 
 ## Other Harnesses
 
