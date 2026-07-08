@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2 - 2026-07-09
+
+- Add a Codex hook-activation section: Codex now supports lifecycle hooks (`~/.codex/hooks.json` or inline `[hooks]` in `config.toml`), so the previous "instruction-level fallback only" advice for Codex was outdated. Key differences documented: no failure-specific event (branch on `tool_response.exit_code` in one `PostToolUse` script), handler `command` is a string with optional `commandWindows`, and non-managed hooks require one-time user trust via `/hooks` before they run.
+- Remove the "Suggested GitHub Metadata" section from the README — authoring-time scaffolding, not reader-facing.
+
 ## 0.3.1 - 2026-07-09
 
 - Replace the untested Claude Code hook sketch with a design deployed and verified live on Windows. The 0.3.0 sketch had a fatal flaw: it listened on `PostToolUse`, which fires only on successful tool calls, so it could never see a failure. The tested design registers one script on both `PostToolUse` (success resets the counter) and `PostToolUseFailure` (failure increments it).

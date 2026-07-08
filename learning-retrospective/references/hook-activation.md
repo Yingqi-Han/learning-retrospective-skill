@@ -119,9 +119,54 @@ Notes:
 - Keep the injected reminder short. Its only job is to break the loop and hand control to the skill.
 - The state file is scoped per session id, so parallel sessions do not interfere.
 
+## Codex Example (config validated 2026-07-09)
+
+Codex supports lifecycle hooks in `~/.codex/hooks.json` (or inline `[hooks]` tables in `config.toml`). Three differences from Claude Code, verified against the official docs and the codex repo:
+
+- There is no failure-specific event ([openai/codex#24907](https://github.com/openai/codex/issues/24907) requests one). `PostToolUse` fires for both success and non-zero exits, and `tool_response` carries `output` and `exit_code` — branch on `exit_code` inside one script instead of registering two events.
+- The handler `command` is a single string (no exec-form `args` array); use `commandWindows` for a Windows-specific override, and full interpreter paths for the same PATH reasons as on Claude Code.
+- Non-managed hooks do not run until the user reviews and trusts them via `/hooks` inside Codex. Installing the files is not enough — tell the user about this step, and re-approve after any edit to the hook definition.
+
+`~/.codex/hooks.json`:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"C:/path/to/python.exe\" \"C:/Users/<user>/.codex/hooks/retry-loop-detector-codex.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The detector script is the Claude Code one with the event branch replaced by:
+
+```python
+resp = data.get("tool_response")
+exit_code = None
+if isinstance(resp, dict):
+    for k in ("exit_code", "exitCode"):
+        if isinstance(resp.get(k), int):
+            exit_code = resp[k]
+            break
+failed = exit_code is not None and exit_code != 0
+# failed -> increment the counter; otherwise reset it
+```
+
+Treat a missing `exit_code` as success rather than failure — a false reminder on every tool call is worse than a missed one. Verify with the same two-step gate: pipe-test with synthetic payloads (fail, fail, success-reset, missing exit_code), then force one real failure in a live session after trusting the hook.
+
 ## Other Harnesses
 
-- **Codex / OpenCode / Cursor / Cline**: if no tool-event hook exists, the fallback is instruction-level — add one line to the harness's persistent instructions: "If the same command fails twice, stop and run the learning-retrospective workflow before any further attempt."
+- **Cursor / Cline / OpenCode**: if no tool-event hook exists, the fallback is instruction-level — add one line to the harness's persistent instructions: "If the same command fails twice, stop and run the learning-retrospective workflow before any further attempt."
 - **Any harness with shell wrappers**: wrap the shell entry point to count repeated failing commands and emit the reminder on stderr, which most agents read.
 
 A hook does not replace the skill; it only guarantees the skill gets a chance to run.

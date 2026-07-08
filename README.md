@@ -79,20 +79,6 @@ This is not a memory database, MCP server, hook framework, or autonomous skill g
 
 It can be used alongside larger systems such as Claudeception, 10x/agent-loom, claude-memory-skill, or agentmemory.
 
-## Suggested GitHub Metadata
-
-Suggested repository description:
-
-```text
-Agent-agnostic skill for breaking retry loops and capturing verified workflow lessons.
-```
-
-Suggested topics:
-
-```text
-agent-skill, codex, claude-code, cursor, cline, opencode, ai-agents, memory, retrospective, workflow
-```
-
 ## License
 
 MIT. See `LICENSE`.
