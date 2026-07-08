@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1 - 2026-07-09
+
+- Keep `learning-retrospective/SKILL.md` ASCII-only so the existing Windows `quick_validate.py` path works even when Python defaults to a non-UTF-8 locale.
+- Install the skill into `~/.codex/skills/learning-retrospective` and run Codex subagent forward tests for one trigger case and one non-trigger case.
+
 ## 0.4.0 - 2026-07-09
 
 - Reframe the skill around its real target: solving the same problem twice. Failure on a novel problem is legitimate exploration and is no longer treated as a signal to interrupt; the only discipline imposed on novel problems is no verbatim retries and one explicit hypothesis per attempt.

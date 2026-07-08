@@ -50,7 +50,7 @@ If your agent does not support skill folders, paste `SKILL.md` into its custom i
 
 | Agent | Tested | Install surface | Notes |
 |---|---:|---|---|
-| Codex | yes, structure validated | `~/.codex/skills/` | Uses `SKILL.md` frontmatter and optional `agents/openai.yaml`. |
+| Codex | yes, structure validated and subagent-tested (2026-07-09) | `~/.codex/skills/` | Uses `SKILL.md` frontmatter and optional `agents/openai.yaml`; keep `SKILL.md` ASCII-only for Windows validator compatibility. |
 | Claude Code | yes, deployed and discovered (2026-07-09) | `~/.claude/skills/` | Copy the folder; the skill is discovered live from `SKILL.md` frontmatter, no restart needed. `agents/openai.yaml` is ignored. Hook-based auto-activation also tested — see `references/hook-activation.md`. |
 | Cursor | not yet | rules or custom instructions | Paste `SKILL.md`; load references manually as needed. |
 | Cline | not yet | `.clinerules` or memory bank | Use as plain Markdown workflow guidance if skill folders are unavailable. |
