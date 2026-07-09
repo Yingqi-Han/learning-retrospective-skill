@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.2 - 2026-07-09
+
+- Add `install.py --dry-run` to print target paths, overwrite status, and optional hook-copy targets without creating, deleting, or copying files.
+- Strengthen the `--skip-tests` warning so agents do not treat skipped tests as an ordinary successful validation path.
+- Exclude Python cache artifacts (`__pycache__`, `*.pyc`, `*.pyo`) when copying the nested skill folder during install.
+- Add the symmetric Codex unsafe-`session_id` test for the hardened hook detector. The hook detector suite is now 10/10 passing on Windows 11.
+- Make the AI-assisted install prompt visible directly in both READMEs, while still pointing agents to `INSTALL_FOR_AGENTS.md`.
+
 ## 0.5.1 - 2026-07-09
 
 - Add `install.py`: one-command install (`python install.py --agent codex|claude|project`) that runs the test suite, copies the nested skill folder, and verifies the result. Hooks are never registered automatically; `--with-hooks` only copies the script and prints manual registration steps. Tested end-to-end including the refuse-overwrite and `--force` paths.

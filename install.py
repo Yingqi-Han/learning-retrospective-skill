@@ -5,6 +5,7 @@ Usage:
     python install.py --agent codex
     python install.py --agent claude
     python install.py --agent project [--target ./.agent-skills]
+    python install.py --agent codex --dry-run
 
 What it does:
     1. Sanity-checks the repository (SKILL.md, VERSION present).
@@ -64,6 +65,8 @@ def main():
                         help="overwrite an existing installed copy")
     parser.add_argument("--skip-tests", action="store_true",
                         help="skip the test suite (not recommended)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="print target paths and planned writes without copying files")
     args = parser.parse_args()
 
     # 1. Sanity checks
@@ -76,7 +79,7 @@ def main():
 
     # 2. Tests
     if args.skip_tests:
-        print("Skipping tests (--skip-tests).")
+        print("WARNING: skipping tests; install may succeed even if hook scripts are broken.")
     else:
         print("Running hook detector tests...")
         result = subprocess.run([sys.executable, str(TESTS)], capture_output=True, text=True)
@@ -93,6 +96,25 @@ def main():
         skills_dir = TARGETS[args.agent]
     dest = skills_dir / "learning-retrospective"
 
+    print(f"Target skills directory: {skills_dir}")
+    print(f"Target skill path: {dest}")
+    if dest.exists():
+        print(f"Existing install: yes ({'would overwrite' if args.force else 'would refuse without --force'})")
+    else:
+        print("Existing install: no")
+    if args.with_hooks and args.agent != "project":
+        script = HOOK_SCRIPTS[args.agent]
+        print(f"Hook script copy target: {HOOK_DIRS[args.agent] / script} (registration remains manual)")
+    elif args.with_hooks:
+        print("Hook script copy target: none (hooks are per-user, not per-project)")
+    else:
+        print("Hook script copy target: none (--with-hooks not set)")
+
+    if args.dry_run:
+        print("DRY RUN: no files were copied, removed, or created.")
+        print("Done.")
+        return
+
     if dest.exists():
         if not args.force:
             fail(f"{dest} already exists. Re-run with --force to overwrite. "
@@ -100,7 +122,11 @@ def main():
                  "trigger phrases (references/localization.md).")
         shutil.rmtree(dest)
     skills_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(SKILL_SRC, dest)
+    shutil.copytree(
+        SKILL_SRC,
+        dest,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+    )
     print(f"Copied skill to {dest}")
 
     # 4. Verify

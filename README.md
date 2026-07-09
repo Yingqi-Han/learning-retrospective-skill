@@ -32,6 +32,20 @@ python install.py --agent project --target ./.agent-skills   # project-level
 
 The installer runs the test suite, copies the nested skill folder, and verifies the result. Hooks are optional and are **not** installed by default; use `--with-hooks` only after reading [`SECURITY_NOTES.md`](SECURITY_NOTES.md), and registration always stays manual. To have an AI agent perform the install, point it at [`INSTALL_FOR_AGENTS.md`](INSTALL_FOR_AGENTS.md).
 
+AI-assisted install prompt:
+
+```text
+Clone https://github.com/Yingqi-Han/learning-retrospective-skill and install it
+for Codex or Claude Code following INSTALL_FOR_AGENTS.md. Do not install hooks
+unless I explicitly confirm.
+```
+
+Preview writes without changing files:
+
+```bash
+python install.py --agent codex --dry-run
+```
+
 ## Manual Install
 
 Copy the nested skill folder into a supported skills directory. Do not copy the repository root unless your agent explicitly supports repository-level skill discovery.

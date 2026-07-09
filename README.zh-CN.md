@@ -32,6 +32,20 @@ python install.py --agent project --target ./.agent-skills   # 项目级
 
 安装器会先跑测试套件，再复制嵌套的技能文件夹并验证结果。钩子是可选的，**默认不安装**；只有在读过 [`SECURITY_NOTES.md`](SECURITY_NOTES.md) 之后才使用 `--with-hooks`，且注册步骤始终需要手动完成。想让 AI agent 代为安装，把 [`INSTALL_FOR_AGENTS.md`](INSTALL_FOR_AGENTS.md) 指给它即可。
 
+让 AI agent 代装时，可以直接给它这段话：
+
+```text
+Clone https://github.com/Yingqi-Han/learning-retrospective-skill and install it
+for Codex or Claude Code following INSTALL_FOR_AGENTS.md. Do not install hooks
+unless I explicitly confirm.
+```
+
+只预览将要写入的位置、不实际改文件：
+
+```bash
+python install.py --agent codex --dry-run
+```
+
 ## 手动安装
 
 把嵌套的技能文件夹复制到受支持的技能目录。不要复制仓库根目录，除非你的 agent 明确支持仓库级技能发现。

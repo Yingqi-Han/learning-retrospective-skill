@@ -166,6 +166,17 @@ class CodexDetectorTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(out, "", "counter must have been reset by the missing-field payload")
 
+    def test_unsafe_session_id_still_works(self):
+        fail = load_fixture("codex-post-tool-use-fail.json")
+        fail = dict(fail)
+        fail["session_id"] = "../weird:session/../" + uuid.uuid4().hex[:8]
+        code, out = run_hook(CODEX, fail)
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "")
+        code, out = run_hook(CODEX, fail)
+        self.assertEqual(code, 0)
+        assert_reminder(self, out)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
