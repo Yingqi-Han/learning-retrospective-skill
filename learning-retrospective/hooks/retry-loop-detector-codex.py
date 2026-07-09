@@ -40,9 +40,14 @@ if isinstance(resp, dict):
             break
 failed = exit_code is not None and exit_code != 0
 
-session = (data.get("session_id") or "global")[:16]
-key = hashlib.sha1(command.encode("utf-8", "replace")).hexdigest()[:12]
-state_path = os.path.join(tempfile.gettempdir(), f"codex-retry-loop-{session}.json")
+# Hash externally supplied values before using them in paths or keys:
+# session_id could contain path separators; the same command in two
+# different working directories is not the same action.
+session_raw = str(data.get("session_id") or "global")
+session_key = hashlib.sha1(session_raw.encode("utf-8", "replace")).hexdigest()[:12]
+cwd = str(data.get("cwd") or "")
+key = hashlib.sha1((cwd + "\n" + command).encode("utf-8", "replace")).hexdigest()[:12]
+state_path = os.path.join(tempfile.gettempdir(), f"codex-retry-loop-{session_key}.json")
 
 try:
     with open(state_path, encoding="utf-8") as f:

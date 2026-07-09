@@ -92,6 +92,36 @@ class ClaudeDetectorTest(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(out, "")
 
+    def test_different_commands_do_not_accumulate(self):
+        fail_a = fresh_session(load_fixture("claude-post-tool-failure.json"))
+        fail_b = dict(fail_a)
+        fail_b["tool_input"] = {"command": "an entirely different command"}
+        run_hook(CLAUDE, fail_a)
+        code, out = run_hook(CLAUDE, fail_b)
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "", "two different failing commands must not trigger")
+
+    def test_same_command_in_different_cwd_does_not_accumulate(self):
+        fail_a = fresh_session(load_fixture("claude-post-tool-failure.json"))
+        fail_a["cwd"] = "/project/a"
+        fail_b = dict(fail_a)
+        fail_b["cwd"] = "/project/b"
+        run_hook(CLAUDE, fail_a)
+        code, out = run_hook(CLAUDE, fail_b)
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "", "same command in different cwd is a different action")
+
+    def test_unsafe_session_id_still_works(self):
+        fail = load_fixture("claude-post-tool-failure.json")
+        fail = dict(fail)
+        fail["session_id"] = "../weird:session/../" + uuid.uuid4().hex[:8]
+        code, out = run_hook(CLAUDE, fail)
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "")
+        code, out = run_hook(CLAUDE, fail)
+        self.assertEqual(code, 0)
+        assert_reminder(self, out)
+
     def test_garbage_input_exits_quietly(self):
         proc = subprocess.run(
             [sys.executable, "-S", str(CLAUDE)],

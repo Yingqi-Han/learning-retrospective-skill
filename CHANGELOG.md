@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.1 - 2026-07-09
+
+- Add `install.py`: one-command install (`python install.py --agent codex|claude|project`) that runs the test suite, copies the nested skill folder, and verifies the result. Hooks are never registered automatically; `--with-hooks` only copies the script and prints manual registration steps. Tested end-to-end including the refuse-overwrite and `--force` paths.
+- Add `INSTALL_FOR_AGENTS.md`: mechanical install instructions for AI agents, with explicit boundaries (no hooks by default, no persistent-config writes, copy only the nested folder, report what was and was not installed).
+- Ship `SECURITY_NOTES.md` inside the nested skill folder so a folder-only install keeps its security guidance; the repository root copy is canonical. Fix the stale "sample hook scripts in references" wording and the dangling reference in `hook-activation.md`.
+- Harden the hook detectors: hash `session_id` before using it in the state filename (path-safe against separator characters), and include `cwd` in the retry key so the same command in two directories is not conflated.
+- Add three edge-case tests: different commands do not accumulate, same command in different cwd does not accumulate, and an unsafe `session_id` (path separators, colons) still counts correctly. 9/9 passing on Windows 11.
+- Add Quick Start sections with the installer commands to both READMEs.
+
 ## 0.5.0 - 2026-07-09
 
 - Extract the hook detector scripts from Markdown into runnable files (`hooks/retry-loop-detector-claude.py`, `hooks/retry-loop-detector-codex.py`) and add an automated stdlib-only test suite (`tests/test_retry_loop_detector.py` with JSON fixtures) covering fail/fail/reset sequences, BOM input, non-Bash tools, garbage input, and the Codex missing-exit-code fail-safe. 6/6 passing on Windows 11.

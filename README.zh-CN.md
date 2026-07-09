@@ -21,7 +21,18 @@
 - 可选地请任何可用的第二审阅者（agent 或模型）做有边界的审计。
 - 可选地通过 harness 钩子（hook）自动激活：检测到重复失败时注入提醒（见 `learning-retrospective/references/hook-activation.md`；其中 Claude Code 检测器已于 2026-07-09 实机部署并验证）。
 
-## 安装
+## 快速开始
+
+```bash
+git clone https://github.com/Yingqi-Han/learning-retrospective-skill.git
+cd learning-retrospective-skill
+python install.py --agent codex     # 或：--agent claude
+python install.py --agent project --target ./.agent-skills   # 项目级
+```
+
+安装器会先跑测试套件，再复制嵌套的技能文件夹并验证结果。钩子是可选的，**默认不安装**；只有在读过 [`SECURITY_NOTES.md`](SECURITY_NOTES.md) 之后才使用 `--with-hooks`，且注册步骤始终需要手动完成。想让 AI agent 代为安装，把 [`INSTALL_FOR_AGENTS.md`](INSTALL_FOR_AGENTS.md) 指给它即可。
+
+## 手动安装
 
 把嵌套的技能文件夹复制到受支持的技能目录。不要复制仓库根目录，除非你的 agent 明确支持仓库级技能发现。
 

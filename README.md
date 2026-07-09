@@ -21,7 +21,18 @@ Failure is not error — repeated attempts on a novel problem are legitimate exp
 - Optionally ask any available secondary reviewer or agent for a bounded audit.
 - Optionally activate automatically via harness hooks that detect repeated failures (see `learning-retrospective/references/hook-activation.md`; the Claude Code detector there is deployed and verified live, 2026-07-09).
 
-## Install
+## Quick Start
+
+```bash
+git clone https://github.com/Yingqi-Han/learning-retrospective-skill.git
+cd learning-retrospective-skill
+python install.py --agent codex     # or: --agent claude
+python install.py --agent project --target ./.agent-skills   # project-level
+```
+
+The installer runs the test suite, copies the nested skill folder, and verifies the result. Hooks are optional and are **not** installed by default; use `--with-hooks` only after reading [`SECURITY_NOTES.md`](SECURITY_NOTES.md), and registration always stays manual. To have an AI agent perform the install, point it at [`INSTALL_FOR_AGENTS.md`](INSTALL_FOR_AGENTS.md).
+
+## Manual Install
 
 Copy the nested skill folder into a supported skills directory. Do not copy the repository root unless your agent explicitly supports repository-level skill discovery.
 

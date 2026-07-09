@@ -19,7 +19,7 @@ Two verified facts shaped the design:
 - `PostToolUse` fires only on **successful** tool calls; failures fire `PostToolUseFailure`. A single-event heuristic that parses `tool_response` for error strings never sees real failures. Register the same script on **both** events: failure increments the counter, success resets it - no fragile output parsing needed.
 - On Windows, hook commands may run through Git Bash, whose PATH can lack `python` even when PowerShell finds it. Use the exec form (`command` + `args`, no shell) with the interpreter's full path. Prefer `python -S` for this stdlib-only detector to avoid site-package startup overhead.
 
-The runnable script is `../hooks/retry-loop-detector-claude.py` (stdlib-only, tested by `../tests/test_retry_loop_detector.py`). Copy it to `~/.claude/hooks/` and review it before registering — see `SECURITY_NOTES.md`.
+The runnable script is `../hooks/retry-loop-detector-claude.py` (stdlib-only, tested by `../tests/test_retry_loop_detector.py`). Copy it to `~/.claude/hooks/` and review it before registering — see `../SECURITY_NOTES.md`.
 
 Register it in `~/.claude/settings.json` (exec form; substitute your interpreter path):
 
