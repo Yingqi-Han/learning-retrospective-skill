@@ -71,6 +71,13 @@ except Exception:
 
 if state.get(key, 0) >= THRESHOLD:
     print(json.dumps({
+        # systemMessage is shown to the USER in the UI; additionalContext is
+        # injected into the MODEL's context. Both matter: an invisible
+        # intervention cannot be trusted or debugged.
+        "systemMessage": (
+            f"Retry-loop detector: same command failed {state[key]}x - "
+            "told the agent to check stored lessons before retrying."
+        ),
         "hookSpecificOutput": {
             "hookEventName": "PostToolUse",
             "additionalContext": (

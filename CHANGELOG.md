@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.3 - 2026-07-09
+
+- Make the hook intervention visible to the user, not just the model: both detectors now emit `systemMessage` (short, shown in the harness UI) alongside `hookSpecificOutput.additionalContext` (full reminder, injected into the model's context). Found while trying to screenshot the reminder in the Claude Code desktop app: the injection worked but left no user-visible trace, and an invisible intervention cannot be trusted or debugged.
+
 ## 0.6.2 - 2026-07-09
 
 - Strip the UTF-8 BOM that a PowerShell 5.1 `Set-Content -Encoding UTF8` edit had introduced into both READMEs.
