@@ -1,4 +1,4 @@
-# Learning Retrospective Skill
+﻿# Learning Retrospective Skill
 
 [![tests](https://github.com/Yingqi-Han/learning-retrospective-skill/actions/workflows/test.yml/badge.svg)](https://github.com/Yingqi-Han/learning-retrospective-skill/actions/workflows/test.yml)
 
@@ -42,7 +42,7 @@ Useful flags:
 - `--print-hook-config` — print the hook registration snippet with resolved local paths; writes nothing.
 - `--dry-run` — preview every path the installer would touch.
 
-To install a fixed version instead of latest `main`, check out a release tag first: `git checkout v0.6.0`.
+To install a fixed version instead of latest `main`, check out a release tag first: `git checkout v0.6.1`.
 
 AI-assisted install prompt:
 

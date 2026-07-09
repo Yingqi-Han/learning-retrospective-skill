@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.1 - 2026-07-09
+
+- Fix the lesson-lint test on CRLF checkouts: Windows GitHub runners check out with `autocrlf=true`, so a `\n`-literal fence split never matched. Normalize newlines and pin subprocess IO encoding to UTF-8.
+- Drop the retired `ubuntu-22.04` / Python 3.8 CI job (the image cancels without running); CI-tested floor is 3.10, code floor remains 3.8 by inspection.
+- CI is green on this release: 9 jobs across Linux/Windows/macOS x Python 3.10/3.12/3.14. Prefer the `v0.6.1` tag over `v0.6.0`, which predates the Windows test fix.
+
 ## 0.6.0 - 2026-07-09
 
 - Add GitHub Actions CI: hook detector tests, lesson lint tests, and an installer end-to-end run (install, dry-run, force-update with locale, uninstall) across Linux/Windows/macOS on Python 3.10-3.14 (3.8 remains the code floor by inspection; EOL interpreters are not CI-tested). Test badges added to both READMEs.

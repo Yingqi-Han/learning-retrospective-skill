@@ -1,4 +1,4 @@
-# Learning Retrospective Skill（学习复盘技能）
+﻿# Learning Retrospective Skill（学习复盘技能）
 
 [![tests](https://github.com/Yingqi-Han/learning-retrospective-skill/actions/workflows/test.yml/badge.svg)](https://github.com/Yingqi-Han/learning-retrospective-skill/actions/workflows/test.yml)
 
@@ -42,7 +42,7 @@ python install.py --agent project --target ./.agent-skills   # 项目级
 - `--print-hook-config` —— 打印含本机真实路径的钩子注册片段，不写任何文件。
 - `--dry-run` —— 预览安装器将要触碰的所有路径。
 
-想安装固定版本而不是最新 `main`，先切换到发布标签：`git checkout v0.6.0`。
+想安装固定版本而不是最新 `main`，先切换到发布标签：`git checkout v0.6.1`。
 
 让 AI agent 代装时，可以直接给它这段话：
 
