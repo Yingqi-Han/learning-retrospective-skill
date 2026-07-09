@@ -1,4 +1,4 @@
-﻿# Learning Retrospective Skill（学习复盘技能）
+# Learning Retrospective Skill（学习复盘技能）
 
 [![tests](https://github.com/Yingqi-Han/learning-retrospective-skill/actions/workflows/test.yml/badge.svg)](https://github.com/Yingqi-Han/learning-retrospective-skill/actions/workflows/test.yml)
 
@@ -42,7 +42,9 @@ python install.py --agent project --target ./.agent-skills   # 项目级
 - `--print-hook-config` —— 打印含本机真实路径的钩子注册片段，不写任何文件。
 - `--dry-run` —— 预览安装器将要触碰的所有路径。
 
-想安装固定版本而不是最新 `main`，先切换到发布标签：`git checkout v0.6.1`。
+想安装固定版本而不是最新 `main`，先切换到发布标签：`git checkout v0.6.2`。
+
+Python 版本：CI 在 3.10-3.14（Linux/Windows/macOS）上实测；代码按检查保持 3.8 兼容，但 EOL 解释器不做 CI 测试。
 
 让 AI agent 代装时，可以直接给它这段话：
 
@@ -66,11 +68,13 @@ python install.py --agent codex --dry-run
 learning-retrospective/
   SKILL.md
   VERSION
+  SECURITY_NOTES.md
   agents/openai.yaml
   references/
   examples/
-  hooks/      # 可运行的重试循环检测脚本（可选）
-  tests/      # 钩子脚本的自动化测试
+  hooks/      # 可运行的重试循环检测脚本 + payload 探针（可选）
+  scripts/    # lesson_lint.py——教训写入记忆前的检查工具
+  tests/      # 钩子脚本和 lint 的自动化测试
 ```
 
 示例：

@@ -24,7 +24,8 @@ What it deliberately does NOT do:
       and prints the registration instructions for you to apply manually
       (see SECURITY_NOTES.md).
 
-Stdlib-only; works on Windows, macOS, and Linux with Python 3.8+.
+Stdlib-only; works on Windows, macOS, and Linux. CI-tested on Python
+3.10-3.14; kept 3.8-compatible by inspection.
 """
 import argparse
 import datetime
@@ -90,6 +91,9 @@ def print_hook_config(agent):
         target = "~/.codex/hooks.json (then trust it via /hooks inside Codex)"
     print(f"Proposed hook registration for {agent} - review, then merge manually into {target}:")
     print(json.dumps(snippet, indent=2))
+    if not (HOOK_DIRS[agent] / HOOK_SCRIPTS[agent]).is_file():
+        print("NOTE: the hook script is not present at that path yet; "
+              "run install.py with --with-hooks first, or copy it manually.")
     print("Nothing was written. See SECURITY_NOTES.md before registering.")
 
 

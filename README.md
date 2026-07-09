@@ -1,4 +1,4 @@
-﻿# Learning Retrospective Skill
+# Learning Retrospective Skill
 
 [![tests](https://github.com/Yingqi-Han/learning-retrospective-skill/actions/workflows/test.yml/badge.svg)](https://github.com/Yingqi-Han/learning-retrospective-skill/actions/workflows/test.yml)
 
@@ -42,7 +42,9 @@ Useful flags:
 - `--print-hook-config` — print the hook registration snippet with resolved local paths; writes nothing.
 - `--dry-run` — preview every path the installer would touch.
 
-To install a fixed version instead of latest `main`, check out a release tag first: `git checkout v0.6.1`.
+To install a fixed version instead of latest `main`, check out a release tag first: `git checkout v0.6.2`.
+
+Python: CI-tested on 3.10-3.14 (Linux/Windows/macOS); the code is kept 3.8-compatible by inspection, but EOL interpreters are not CI-tested.
 
 AI-assisted install prompt:
 
@@ -66,11 +68,13 @@ Copy the nested skill folder into a supported skills directory. Do not copy the 
 learning-retrospective/
   SKILL.md
   VERSION
+  SECURITY_NOTES.md
   agents/openai.yaml
   references/
   examples/
-  hooks/      # runnable retry-loop detector scripts (optional)
-  tests/      # automated tests for the hook scripts
+  hooks/      # runnable retry-loop detector scripts + payload probe (optional)
+  scripts/    # lesson_lint.py - lint a lesson before writing it to memory
+  tests/      # automated tests for the hook scripts and the lint
 ```
 
 Examples:

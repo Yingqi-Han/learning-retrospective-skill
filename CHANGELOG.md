@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.2 - 2026-07-09
+
+- Strip the UTF-8 BOM that a PowerShell 5.1 `Set-Content -Encoding UTF8` edit had introduced into both READMEs.
+- Update the manual-install tree to include `SECURITY_NOTES.md` and `scripts/`, matching the actual package contents.
+- `--print-hook-config` now notes when the hook script is not yet present at the printed path (run `--with-hooks` first).
+- State the Python support boundary precisely in both READMEs and the installer docstring: CI-tested on 3.10-3.14, kept 3.8-compatible by inspection.
+
 ## 0.6.1 - 2026-07-09
 
 - Fix the lesson-lint test on CRLF checkouts: Windows GitHub runners check out with `autocrlf=true`, so a `\n`-literal fence split never matched. Normalize newlines and pin subprocess IO encoding to UTF-8.
