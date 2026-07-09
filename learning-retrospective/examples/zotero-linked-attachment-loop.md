@@ -20,7 +20,7 @@ The agent imports large documents into Zotero storage, then the user clarifies t
 
 1. Confirm the desired source file and output format.
 2. Create or verify the external file in the project folder.
-3. Configure Zotero or its database/API to link the external file rather than copy it.
+3. Use the Zotero UI or a supported API to link the external file rather than copy it. Do not edit the Zotero SQLite database directly unless Zotero is closed, the database is backed up, and the user explicitly approves.
 4. Verify the Zotero item points to the external file and the storage copy does not exist.
 5. Remove temporary backups only after the user confirms the library looks normal.
 

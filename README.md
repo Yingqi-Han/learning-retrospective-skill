@@ -1,5 +1,7 @@
 # Learning Retrospective Skill
 
+**English** | [简体中文](README.zh-CN.md)
+
 `learning-retrospective` is a small, agent-agnostic skill for stopping repeated trial-and-error and preserving verified lessons.
 
 It is designed to work with Codex, Claude Code, Cursor, Cline, OpenCode, or any agent harness that can load `SKILL.md`-style instructions or plain Markdown guidance.
@@ -26,8 +28,12 @@ Copy the nested skill folder into a supported skills directory. Do not copy the 
 ```text
 learning-retrospective/
   SKILL.md
+  VERSION
   agents/openai.yaml
   references/
+  examples/
+  hooks/      # runnable retry-loop detector scripts (optional)
+  tests/      # automated tests for the hook scripts
 ```
 
 Examples:
@@ -48,13 +54,23 @@ If your agent does not support skill folders, paste `SKILL.md` into its custom i
 
 ### Localization of trigger phrases
 
-The repository copy of `SKILL.md` is ASCII-only because at least one skill validator (Codex `quick_validate.py` on Windows) reads files with the locale default encoding and crashes on non-ASCII bytes under a GBK locale. If you interact with your agent in another language and your harness handles UTF-8 (Claude Code does), append native-language trigger phrases to the `description:` line of your **installed** copy — description-based recall improves markedly when the trigger words match the language you actually type. Example additions for Chinese: 复盘, 总结经验, 记住这个坑, 避免重复踩坑.
+The repository copy of `SKILL.md` is ASCII-only because at least one skill validator (Codex `quick_validate.py` on Windows) reads files with the locale default encoding and crashes on non-ASCII bytes under a GBK locale. If you interact with your agent in another language and your harness handles UTF-8 (Claude Code does), append native-language trigger phrases to the `description:` line of your **installed** copy — description-based recall improves markedly when the trigger words match the language you actually type. See `learning-retrospective/references/localization.md` for a copy-paste Chinese addendum and guidance for other languages.
+
+### Hooks (optional, read the security notes first)
+
+Runnable retry-loop detector scripts for Claude Code and Codex live in `learning-retrospective/hooks/`, with an automated test suite in `learning-retrospective/tests/` (stdlib-only):
+
+```bash
+python learning-retrospective/tests/test_retry_loop_detector.py
+```
+
+Hooks are executable local code that runs on every future tool call — read `SECURITY_NOTES.md` before installing, review the scripts, and verify with one forced live failure after registration. Registration steps per harness are in `learning-retrospective/references/hook-activation.md`.
 
 ## Compatibility
 
 | Agent | Tested | Install surface | Notes |
 |---|---:|---|---|
-| Codex | yes, structure validated and subagent-tested (Windows 11, Codex desktop app 26.6xx, 2026-07-09) | `~/.codex/skills/` | Uses `SKILL.md` frontmatter and optional `agents/openai.yaml`; keep `SKILL.md` ASCII-only for Windows validator compatibility. Hook config pipe-tested; hook field shapes are empirical, re-test after upgrades. |
+| Codex | yes, structure validated and subagent-tested (Windows 11, Codex desktop app 26.623.141536, 2026-07-09) | `~/.codex/skills/` | Uses `SKILL.md` frontmatter and optional `agents/openai.yaml`; keep `SKILL.md` ASCII-only for Windows validator compatibility. Hook config pipe-tested; hook field shapes are empirical, re-test after upgrades. |
 | Claude Code | yes, deployed and discovered (Windows 11, 2026-07-09) | `~/.claude/skills/` | Copy the folder; the skill is discovered live from `SKILL.md` frontmatter, no restart needed. `agents/openai.yaml` is ignored. Hook-based auto-activation verified live same date — see `references/hook-activation.md`. |
 | Cursor | not yet | rules or custom instructions | Paste `SKILL.md`; load references manually as needed. |
 | Cline | not yet | `.clinerules` or memory bank | Use as plain Markdown workflow guidance if skill folders are unavailable. |
@@ -66,6 +82,7 @@ The repository copy of `SKILL.md` is ASCII-only because at least one skill valid
 - Present the proposed lesson and target surface first when permission is unclear.
 - Do not store secrets, tokens, cookies, credentials, private data, long raw logs, or unverified guesses.
 - Complete the user's task before spending time on retrospective writing.
+- Before installing hook scripts, read [`SECURITY_NOTES.md`](SECURITY_NOTES.md): hooks are executable local code, and lessons are persistent privileged writes (memory-poisoning surface).
 
 ## Examples
 
@@ -77,6 +94,7 @@ The `examples/` directory contains concrete loop patterns:
 - Zotero linked attachment loop
 - Dependency install loop
 - A filled, completed lesson (LibreOffice conversion) showing what capture output should look like
+- Anti-examples (`bad-lessons.md`): captures that poison memory and must be rejected
 
 ## Positioning
 

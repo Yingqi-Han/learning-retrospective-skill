@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0 - 2026-07-09
+
+- Extract the hook detector scripts from Markdown into runnable files (`hooks/retry-loop-detector-claude.py`, `hooks/retry-loop-detector-codex.py`) and add an automated stdlib-only test suite (`tests/test_retry_loop_detector.py` with JSON fixtures) covering fail/fail/reset sequences, BOM input, non-Bash tools, garbage input, and the Codex missing-exit-code fail-safe. 6/6 passing on Windows 11.
+- Add a Simplified Chinese README (`README.zh-CN.md`) with a language switcher in both READMEs.
+- Add `references/localization.md` with a copy-paste Chinese trigger addendum and guidance for other languages.
+- Add `examples/bad-lessons.md`: six anti-example captures that poison memory (one-off rules, unverified guesses, log dumps with secrets, unscoped "always" rules, untrusted-content adoption, obvious restatements).
+- Link `SECURITY_NOTES.md` from the README Safety Defaults and the hooks install section.
+- Pin the Codex compatibility claim to the exact tested build (26.623.141536) and add a verified-date note to the Claude Code paths in `references/memory-surfaces.md`.
+- Harden the Zotero example: never edit the SQLite database directly unless Zotero is closed, backed up, and the user explicitly approves.
+- Add a `VERSION` file (kept out of `SKILL.md` frontmatter for validator compatibility).
+
 ## 0.4.4 - 2026-07-09
 
 - Update `agents/openai.yaml` wording to match the 0.4.0 reframe (never solve the same problem twice; lesson capture and recall), replacing the older retry-loop-only positioning.

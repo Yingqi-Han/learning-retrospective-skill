@@ -21,6 +21,8 @@ Examples:
 
 Note for Claude Code: when writing a lesson as a memory file, use the harness's native frontmatter format rather than the raw Lesson Template — put the trigger into `description:` (that field drives recall) and the template body below the frontmatter.
 
+Platform paths above are drift-prone facts. The Claude Code details were verified on Windows 11, 2026-07-09; re-check them after harness upgrades before relying on them.
+
 ## Project-Level Memory
 
 Use for repository-specific facts:

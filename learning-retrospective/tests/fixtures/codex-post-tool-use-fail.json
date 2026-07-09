@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PostToolUse",
+  "session_id": "FIXTURE_SESSION",
+  "tool_name": "Bash",
+  "tool_input": { "command": "pip install nonexistent-package-xyz" },
+  "tool_response": { "output": "ERROR: No matching distribution", "exit_code": 1 }
+}

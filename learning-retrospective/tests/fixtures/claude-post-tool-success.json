@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "PostToolUse",
+  "session_id": "FIXTURE_SESSION",
+  "tool_name": "Bash",
+  "tool_input": { "command": "conda run -n missing-env python script.py" },
+  "tool_response": { "stdout": "ok" }
+}

@@ -96,7 +96,7 @@ Before writing to user memory, repository docs, project rules, or another skill:
 
 ## Automatic Activation
 
-This skill is normally recalled through its description, which is weakest exactly when an agent is mid-loop. If your harness supports hooks or tool-event callbacks, wire a repeated-failure detector that injects a reminder to invoke this skill. See `references/hook-activation.md` for a tested Claude Code detector and the general pattern for other harnesses. Treat any hook config you write as an artifact under this skill's own rules: pipe-test it with synthetic input, then force one real failure to prove it fires, before trusting it.
+This skill is normally recalled through its description, which is weakest exactly when an agent is mid-loop. If your harness supports hooks or tool-event callbacks, wire a repeated-failure detector that injects a reminder to invoke this skill. Runnable detector scripts live in `hooks/` (Claude Code and Codex variants) with an automated test suite in `tests/`; see `references/hook-activation.md` for registration, trust requirements, and the general pattern for other harnesses. Treat any hook config you write as an artifact under this skill's own rules: run the test suite, then force one real failure to prove it fires, before trusting it.
 
 ## Examples
 
@@ -108,6 +108,7 @@ Use examples as anchors for trigger and execution behavior:
 - `examples/zotero-linked-attachment-loop.md`
 - `examples/dependency-install-loop.md`
 - `examples/filled-lesson-libreoffice.md` (a completed lesson, not a pattern)
+- `examples/bad-lessons.md` (anti-examples: captures that poison memory)
 
 ## Lesson Template
 
