@@ -41,7 +41,7 @@ Goal: install the `learning-retrospective` skill from this repository into the u
    - `<target>/VERSION` exists and matches `learning-retrospective/VERSION` in the repo
    - `<target>/SECURITY_NOTES.md` exists
 
-4. Optional, recommended for non-English users: append native-language trigger phrases to the installed copy's `description:` line, following `<target>/references/localization.md`. Ask the user which language they type in if unclear.
+4. Optional, recommended for non-English users: add native-language trigger phrases. For Chinese, prefer the installer flag `--locale zh-CN` (idempotent); for other languages follow `<target>/references/localization.md`. Ask the user which language they type in if unclear.
 
 5. Report to the user: installed version, target path, test result, and that hooks were NOT installed.
 

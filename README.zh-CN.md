@@ -1,5 +1,7 @@
 # Learning Retrospective Skill（学习复盘技能）
 
+[![tests](https://github.com/Yingqi-Han/learning-retrospective-skill/actions/workflows/test.yml/badge.svg)](https://github.com/Yingqi-Han/learning-retrospective-skill/actions/workflows/test.yml)
+
 [English](README.md) | **简体中文**
 
 `learning-retrospective` 是一个小型、与具体 agent 无关的技能（skill），用于终止重复试错并沉淀已验证的经验教训。
@@ -31,6 +33,16 @@ python install.py --agent project --target ./.agent-skills   # 项目级
 ```
 
 安装器会先跑测试套件，再复制嵌套的技能文件夹并验证结果。钩子是可选的，**默认不安装**；只有在读过 [`SECURITY_NOTES.md`](SECURITY_NOTES.md) 之后才使用 `--with-hooks`，且注册步骤始终需要手动完成。想让 AI agent 代为安装，把 [`INSTALL_FOR_AGENTS.md`](INSTALL_FOR_AGENTS.md) 指给它即可。
+
+常用参数：
+
+- `--locale zh-CN` —— 自动把中文触发词追加到已安装副本的描述里（显著提升中文召回率，中文用户建议加上）。
+- `--force` —— 更新已安装副本；旧副本会保留为带时间戳的 `.bak` 文件夹。
+- `--uninstall` —— 移除已安装的技能文件夹（绝不动钩子脚本和注册配置）。
+- `--print-hook-config` —— 打印含本机真实路径的钩子注册片段，不写任何文件。
+- `--dry-run` —— 预览安装器将要触碰的所有路径。
+
+想安装固定版本而不是最新 `main`，先切换到发布标签：`git checkout v0.6.0`。
 
 让 AI agent 代装时，可以直接给它这段话：
 

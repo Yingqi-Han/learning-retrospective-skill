@@ -16,6 +16,10 @@ Copy-paste segment to append after "...retrospective or lesson to prevent future
 
 The same pattern applies: pick the 5-8 short phrases a user of that language would actually type when asking for a retrospective, a lesson, or an end to repeated trial-and-error. Prefer everyday imperative phrasings over formal vocabulary — recall matches what users type, not what dictionaries prefer.
 
+## Automated via the installer
+
+`python install.py --agent claude --locale zh-CN` applies the Chinese addendum to the installed copy automatically (idempotent - safe to re-run). After updating with `--force`, pass `--locale` again to re-apply.
+
 ## Caveats
 
 - Re-apply the addendum after re-installing or syncing from the repository; the repo copy will overwrite it.

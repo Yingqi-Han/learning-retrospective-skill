@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0 - 2026-07-09
+
+- Add GitHub Actions CI: hook detector tests, lesson lint tests, and an installer end-to-end run (install, dry-run, force-update with locale, uninstall) across Linux/Windows/macOS and Python 3.8-3.14. Test badges added to both READMEs.
+- Tag releases starting with v0.6.0 so users can install a fixed version (`git checkout v0.6.0`) instead of tracking `main`.
+- Installer: add `--uninstall` (removes only the skill folder, never hook files or registrations), `--locale zh-CN` (idempotently appends Chinese trigger phrases to the installed description), and `--print-hook-config` (prints the registration snippet with resolved local interpreter/script paths, writes nothing). `--force` now backs up the existing install to a timestamped `.bak` folder instead of deleting it, and warns when the backup contained localized trigger phrases.
+- Add `scripts/lesson_lint.py`: lint a lesson before it is written to persistent memory - flags credential patterns (AWS/GitHub/OpenAI-style keys, JWTs, PEM blocks, credential assignments), raw-log code blocks over 40 lines, missing durability sections (Trigger, Verified Facts, Preferred Procedure, Scope, Last Verified), and hedged language inside Verified Facts. Covered by `tests/test_lesson_lint.py` (5 tests, includes the shipped filled example as a clean fixture).
+- Add `hooks/payload-probe.py` plus a "Verifying the Current Hook Schema" section in `hook-activation.md`: a temporary hook that records payload key names and value types (never values) so users can re-verify empirical field shapes such as Codex `tool_response.exit_code` after harness upgrades.
+
 ## 0.5.2 - 2026-07-09
 
 - Add `install.py --dry-run` to print target paths, overwrite status, and optional hook-copy targets without creating, deleting, or copying files.

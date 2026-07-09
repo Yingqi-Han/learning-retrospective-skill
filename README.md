@@ -1,5 +1,7 @@
 # Learning Retrospective Skill
 
+[![tests](https://github.com/Yingqi-Han/learning-retrospective-skill/actions/workflows/test.yml/badge.svg)](https://github.com/Yingqi-Han/learning-retrospective-skill/actions/workflows/test.yml)
+
 **English** | [简体中文](README.zh-CN.md)
 
 `learning-retrospective` is a small, agent-agnostic skill for stopping repeated trial-and-error and preserving verified lessons.
@@ -31,6 +33,16 @@ python install.py --agent project --target ./.agent-skills   # project-level
 ```
 
 The installer runs the test suite, copies the nested skill folder, and verifies the result. Hooks are optional and are **not** installed by default; use `--with-hooks` only after reading [`SECURITY_NOTES.md`](SECURITY_NOTES.md), and registration always stays manual. To have an AI agent perform the install, point it at [`INSTALL_FOR_AGENTS.md`](INSTALL_FOR_AGENTS.md).
+
+Useful flags:
+
+- `--locale zh-CN` — append Chinese trigger phrases to the installed description (better recall for Chinese users; see `references/localization.md`).
+- `--force` — update an existing install; the old copy is kept as a timestamped `.bak` folder.
+- `--uninstall` — remove the installed skill folder (hook scripts/registrations are never touched).
+- `--print-hook-config` — print the hook registration snippet with resolved local paths; writes nothing.
+- `--dry-run` — preview every path the installer would touch.
+
+To install a fixed version instead of latest `main`, check out a release tag first: `git checkout v0.6.0`.
 
 AI-assisted install prompt:
 

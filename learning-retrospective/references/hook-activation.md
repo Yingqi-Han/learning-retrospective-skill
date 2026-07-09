@@ -98,6 +98,17 @@ Codex supports lifecycle hooks in `~/.codex/hooks.json` (or inline `[hooks]` tab
 
 The runnable script is `../hooks/retry-loop-detector-codex.py`. It treats a missing `exit_code` as success rather than failure - a false reminder on every tool call is worse than a missed one, so a renamed field silently disables detection instead of spamming. Verify with the same two-step gate: run `../tests/test_retry_loop_detector.py` (its Codex cases cover fail/fail/reset and the missing-exit-code fail-safe), then force one real failure in a live session after trusting the hook.
 
+## Verifying the Current Hook Schema
+
+Payload shapes are empirical, not guaranteed - especially on Codex, whose generated schema leaves `tool_response` unconstrained. After a harness upgrade, or before relying on a field the docs do not promise, run the shape probe:
+
+1. Temporarily register `../hooks/payload-probe.py` the same way as the detector (same interpreter, same event).
+2. Trigger one successful and one failing command.
+3. Read `<temp dir>/hook-payload-shape.jsonl`: each line records key names and value types only - never values - so nothing sensitive lands on disk.
+4. Confirm the fields the detector depends on (`tool_input.command`, and on Codex `tool_response.exit_code`) still exist, then unregister the probe and delete the file.
+
+If `exit_code` disappeared, the Codex detector fails safe (silently stops detecting) rather than spamming false reminders - the probe is how you notice.
+
 ## Other Harnesses
 
 - **Cursor / Cline / OpenCode**: if no tool-event hook exists, the fallback is instruction-level - add one line to the harness's persistent instructions: "If the same command fails twice, stop and run the learning-retrospective workflow before any further attempt."
