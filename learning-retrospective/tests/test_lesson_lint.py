@@ -1,4 +1,5 @@
 """Tests for scripts/lesson_lint.py. Stdlib-only; run directly with python."""
+import os
 import subprocess
 import sys
 import unittest
@@ -39,8 +40,9 @@ BAD_LESSON = """# Lesson: bad
 
 def run_lint(args=None, stdin=None):
     cmd = [sys.executable, "-S", str(LINT)] + (args or [])
+    env = dict(os.environ, PYTHONIOENCODING="utf-8")
     result = subprocess.run(cmd, input=stdin, capture_output=True, text=True,
-                            encoding="utf-8", timeout=30)
+                            encoding="utf-8", timeout=30, env=env)
     return result.returncode, result.stdout
 
 
@@ -66,8 +68,9 @@ class LessonLintTests(unittest.TestCase):
 
     def test_shipped_filled_example_passes(self):
         # The example file wraps the lesson in a ```markdown display fence;
-        # lint the lesson body itself, as it would be stored.
-        text = FILLED.read_text(encoding="utf-8")
+        # lint the lesson body itself, as it would be stored. Normalize CRLF:
+        # Windows CI runners check out with autocrlf=true.
+        text = FILLED.read_text(encoding="utf-8").replace("\r\n", "\n")
         body = text.split("```markdown\n", 1)[1].split("\n```", 1)[0]
         code, out = run_lint(["-"], stdin=body)
         self.assertEqual(code, 0, out)
