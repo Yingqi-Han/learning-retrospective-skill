@@ -79,6 +79,12 @@ class LessonLintTests(unittest.TestCase):
         code, _ = run_lint([])
         self.assertEqual(code, 2)
 
+    def test_help_flag_prints_usage_and_exits_zero(self):
+        code, out = run_lint(["--help"])
+        self.assertEqual(code, 0, out)
+        self.assertIn("usage", out.lower())
+        self.assertIn("LESSON", out)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

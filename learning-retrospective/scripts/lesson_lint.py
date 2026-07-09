@@ -16,6 +16,7 @@ Checks (see SECURITY_NOTES.md for the rationale):
 
 Exit code 0 = clean, 1 = findings, 2 = usage error. Stdlib-only.
 """
+import argparse
 import re
 import sys
 
@@ -76,12 +77,20 @@ def lint_text(text, name="<stdin>"):
     return findings
 
 
-def main(argv):
-    if len(argv) < 2:
-        print(__doc__)
-        return 2
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        prog="lesson_lint.py",
+        description="Lint a captured lesson before it is written to persistent "
+                    "memory: flags credential patterns, raw-log dumps, missing "
+                    "durability sections, and hedged language in Verified Facts.",
+        epilog="Exit codes: 0 = clean, 1 = findings, 2 = usage error. "
+               "See SECURITY_NOTES.md for the rationale.")
+    parser.add_argument("paths", nargs="+", metavar="LESSON",
+                        help="lesson markdown file(s), or - to read from stdin")
+    args = parser.parse_args(argv)
+
     findings = []
-    for arg in argv[1:]:
+    for arg in args.paths:
         if arg == "-":
             findings += lint_text(sys.stdin.read())
         else:
@@ -101,4 +110,4 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(main())

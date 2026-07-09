@@ -37,6 +37,10 @@ Agents using this skill should not silently modify:
 
 If the user did not explicitly ask to save or update the lesson, present the proposed lesson and destination first.
 
+## Release Verification
+
+Git tags in this repository are annotated but not GPG-signed. If your threat model requires provenance beyond GitHub account trust, pin the commit SHA instead of the tag name (`git checkout <sha>` after inspecting `git log --format="%H %s" v0.6.x`), review the diff before use, and re-run the test suite locally. The skill and hooks are small, stdlib-only Python and Markdown - a full review takes minutes.
+
 ## Reporting Issues
 
 Open a GitHub issue if the skill encourages unsafe persistence, over-broad triggering, or accidental disclosure of sensitive information.

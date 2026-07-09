@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.4 - 2026-07-09
+
+- Fix `lesson_lint.py --help`: the flag was treated as a file path and errored. The CLI now uses argparse with proper usage/help output; exit-code contract unchanged (0 clean, 1 findings, 2 usage error). Added a help-flag test (lint suite now 7 tests).
+- Add a Release Verification section to `SECURITY_NOTES.md`: tags are annotated but not GPG-signed; strict environments should pin and review a commit SHA rather than trusting a tag name.
+
+
 ## 0.6.3 - 2026-07-09
 
 - Make the hook intervention visible to the user, not just the model: both detectors now emit `systemMessage` (short, shown in the harness UI) alongside `hookSpecificOutput.additionalContext` (full reminder, injected into the model's context). Found while trying to screenshot the reminder in the Claude Code desktop app: the injection worked but left no user-visible trace, and an invisible intervention cannot be trusted or debugged.
