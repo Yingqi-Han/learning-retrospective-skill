@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3 - 2026-07-09
+
+- Optimize hook examples for stdlib-only retry detectors: run Python with `-S` to skip site-package startup and reduce the timeout from 10 seconds to 5 seconds.
+- Read hook JSON from `stdin.buffer` with `utf-8-sig` decoding, so Windows/BOM input does not silently disable the detector.
+- Replace Unicode punctuation in `references/hook-activation.md` with ASCII punctuation for more portable validation and display.
+
 ## 0.4.2 - 2026-07-09
 
 - Extend `SECURITY_NOTES.md` for the hook era: hooks are executable local code (never auto-installed without explicit approval, full interpreter paths, re-review after edits), and lessons are privileged writes — never capture a lesson sourced solely from untrusted content (memory-poisoning defense), scrub secrets from commands and error text before capture.
