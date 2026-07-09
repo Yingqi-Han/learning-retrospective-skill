@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.4 - 2026-07-09
+
+- Update `agents/openai.yaml` wording to match the 0.4.0 reframe (never solve the same problem twice; lesson capture and recall), replacing the older retry-loop-only positioning.
+- Re-verify the Claude Code deployment live after syncing it to the 0.4.3 hook design (`-S`, 5s timeout, `utf-8-sig` stdin): reminder injected on the second identical failure.
+
 ## 0.4.3 - 2026-07-09
 
 - Optimize hook examples for stdlib-only retry detectors: run Python with `-S` to skip site-package startup and reduce the timeout from 10 seconds to 5 seconds.
