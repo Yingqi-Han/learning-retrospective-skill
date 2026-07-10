@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.6 - 2026-07-10
+
+- Fix the cross-platform CI assertion for ASCII-safe localized descriptions. The original one-line YAML/Bash/Python command lost one backslash layer under Bash and compared decoded Chinese text against escaped on-disk text, even though all 20 tests and installer operations had passed. Use an ASCII-only Python here-document and construct the decoded trigger from Unicode code points, avoiding both multi-layer escaping and shell-specific source encoding.
+
 ## 0.6.5 - 2026-07-10
 
 - Make installation genuinely transactional: copy, localize, and verify in an external staging directory before activation; keep timestamped backups outside active skill discovery; restore the previous install automatically if activation or final verification fails.

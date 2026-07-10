@@ -42,7 +42,7 @@ Useful flags:
 - `--print-hook-config` — print the hook registration snippet with resolved local paths; writes nothing.
 - `--dry-run` — preview every path the installer would touch.
 
-To install a fixed version instead of latest `main`, check out the latest release tag first (`git tag --list`, then e.g. `git checkout v0.6.5`).
+To install a fixed version instead of latest `main`, check out the latest release tag first (`git tag --list`, then e.g. `git checkout v0.6.6`).
 
 Python: CI-tested on 3.10-3.14 (Linux/Windows/macOS); the code is kept 3.8-compatible by inspection, but EOL interpreters are not CI-tested.
 

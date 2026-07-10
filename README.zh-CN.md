@@ -42,7 +42,7 @@ python install.py --agent project --target ./.agent-skills   # 项目级
 - `--print-hook-config` —— 打印含本机真实路径的钩子注册片段，不写任何文件。
 - `--dry-run` —— 预览安装器将要触碰的所有路径。
 
-想安装固定版本而不是最新 `main`，先切换到最新发布标签（`git tag --list` 查看，再如 `git checkout v0.6.5`）。
+想安装固定版本而不是最新 `main`，先切换到最新发布标签（`git tag --list` 查看，再如 `git checkout v0.6.6`）。
 
 Python 版本：CI 在 3.10-3.14（Linux/Windows/macOS）上实测；代码按检查保持 3.8 兼容，但 EOL 解释器不做 CI 测试。
 

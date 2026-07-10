@@ -31,7 +31,16 @@ jobs:
           python install.py --agent project --target ./tmp-skills
           python install.py --agent project --target ./tmp-skills --dry-run --skip-tests
           python install.py --agent project --target ./tmp-skills --force --skip-tests --locale zh-CN
-          python -c "from pathlib import Path; p=Path('tmp-skills/learning-retrospective/SKILL.md'); text=p.read_text(encoding='ascii'); assert '\\u590d\\u76d8' in text"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("tmp-skills/learning-retrospective/SKILL.md")
+          text = path.read_text(encoding="ascii")
+          line = next(line for line in text.splitlines() if line.startswith("description:"))
+          localized_description = json.loads(line.split(":", 1)[1].strip())
+          assert chr(0x590D) + chr(0x76D8) in localized_description
+          PY
           test ! -d ./tmp-skills/learning-retrospective.bak-*
           test -d ./.tmp-skills-backups
           python install.py --agent project --target ./tmp-skills --uninstall
