@@ -4,12 +4,14 @@ Stdlib-only. Run from anywhere:
 
     python learning-retrospective/tests/test_retry_loop_detector.py
 
-Each test uses a fresh random session id, so repeated runs do not pollute
-each other through the per-session state files in the temp directory.
+Each test uses a fresh random session id and removes its state file afterward,
+so repeated runs do not pollute the temp directory.
 """
+import hashlib
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
 import uuid
 from pathlib import Path
@@ -22,6 +24,7 @@ CLAUDE = HOOKS_DIR / "retry-loop-detector-claude.py"
 CODEX = HOOKS_DIR / "retry-loop-detector-codex.py"
 
 BOM = b"\xef\xbb\xbf"
+CREATED_STATE_PATHS = set()
 
 
 def load_fixture(name):
@@ -29,6 +32,15 @@ def load_fixture(name):
 
 
 def run_hook(script, payload, bom=False):
+    session_id = payload.get("session_id")
+    if session_id:
+        prefix = "codex" if script == CODEX else "claude"
+        session_key = hashlib.sha1(
+            str(session_id).encode("utf-8", "replace")
+        ).hexdigest()[:12]
+        CREATED_STATE_PATHS.add(
+            Path(tempfile.gettempdir()) / f"{prefix}-retry-loop-{session_key}.json"
+        )
     raw = json.dumps(payload).encode("utf-8")
     if bom:
         raw = BOM + raw
@@ -47,12 +59,20 @@ def fresh_session(payload):
     return payload
 
 
-def assert_reminder(testcase, out):
-    testcase.assertTrue(out, "expected a reminder on the second failure")
+def assert_reminder(testcase, out, count=2):
+    testcase.assertTrue(out, f"expected a reminder on failure {count}")
     parsed = json.loads(out)
     ctx = parsed["hookSpecificOutput"]["additionalContext"]
-    testcase.assertIn("failed 2 times", ctx)
+    testcase.assertIn(f"failed {count} times", ctx)
     testcase.assertIn("lesson", ctx)
+
+
+def tearDownModule():
+    for path in CREATED_STATE_PATHS:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 class ClaudeDetectorTest(unittest.TestCase):
@@ -132,6 +152,24 @@ class ClaudeDetectorTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         self.assertEqual(proc.stdout.decode().strip(), "")
 
+    def test_reminder_uses_exponential_backoff(self):
+        fail = fresh_session(load_fixture("claude-post-tool-failure.json"))
+        run_hook(CLAUDE, fail)
+        _, second = run_hook(CLAUDE, fail)
+        _, third = run_hook(CLAUDE, fail)
+        _, fourth = run_hook(CLAUDE, fail)
+        assert_reminder(self, second, 2)
+        self.assertEqual(third, "", "third failure must not repeat the reminder")
+        assert_reminder(self, fourth, 4)
+
+    def test_missing_session_id_fails_safe(self):
+        fail = load_fixture("claude-post-tool-failure.json")
+        fail.pop("session_id", None)
+        for _ in range(2):
+            code, out = run_hook(CLAUDE, fail)
+            self.assertEqual(code, 0)
+            self.assertEqual(out, "")
+
 
 class CodexDetectorTest(unittest.TestCase):
     def test_second_identical_failure_emits_reminder_then_success_resets(self):
@@ -176,6 +214,24 @@ class CodexDetectorTest(unittest.TestCase):
         code, out = run_hook(CODEX, fail)
         self.assertEqual(code, 0)
         assert_reminder(self, out)
+
+    def test_reminder_uses_exponential_backoff(self):
+        fail = fresh_session(load_fixture("codex-post-tool-use-fail.json"))
+        run_hook(CODEX, fail)
+        _, second = run_hook(CODEX, fail)
+        _, third = run_hook(CODEX, fail)
+        _, fourth = run_hook(CODEX, fail)
+        assert_reminder(self, second, 2)
+        self.assertEqual(third, "", "third failure must not repeat the reminder")
+        assert_reminder(self, fourth, 4)
+
+    def test_missing_session_id_fails_safe(self):
+        fail = load_fixture("codex-post-tool-use-fail.json")
+        fail.pop("session_id", None)
+        for _ in range(2):
+            code, out = run_hook(CODEX, fail)
+            self.assertEqual(code, 0)
+            self.assertEqual(out, "")
 
 
 if __name__ == "__main__":

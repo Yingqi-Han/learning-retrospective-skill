@@ -36,13 +36,13 @@ python install.py --agent project --target ./.agent-skills   # 项目级
 
 常用参数：
 
-- `--locale zh-CN` —— 自动把中文触发词追加到已安装副本的描述里（显著提升中文召回率，中文用户建议加上）。
-- `--force` —— 更新已安装副本；旧副本会保留为带时间戳的 `.bak` 文件夹。
+- `--locale zh-CN` —— 把中文触发词以 ASCII YAML 转义写入描述，在提升中文召回率的同时兼容 Windows 默认编码校验器。
+- `--force` —— 事务式更新已安装副本；旧副本保存在活动 skills 发现目录之外的带时间戳备份目录中。
 - `--uninstall` —— 移除已安装的技能文件夹（绝不动钩子脚本和注册配置）。
 - `--print-hook-config` —— 打印含本机真实路径的钩子注册片段，不写任何文件。
 - `--dry-run` —— 预览安装器将要触碰的所有路径。
 
-想安装固定版本而不是最新 `main`，先切换到最新发布标签（`git tag --list` 查看，再如 `git checkout v0.6.3`）。
+想安装固定版本而不是最新 `main`，先切换到最新发布标签（`git tag --list` 查看，再如 `git checkout v0.6.5`）。
 
 Python 版本：CI 在 3.10-3.14（Linux/Windows/macOS）上实测；代码按检查保持 3.8 兼容，但 EOL 解释器不做 CI 测试。
 
@@ -95,14 +95,14 @@ cp -r ./learning-retrospective ./.agent-skills/
 
 ### 触发词本地化
 
-仓库里的 `SKILL.md` 保持纯 ASCII，因为至少有一个技能校验器（Windows 上的 Codex `quick_validate.py`）用系统默认编码读文件，在 GBK 环境下遇到非 ASCII 字节会崩溃。如果你用其他语言与 agent 交互、且你的 harness 支持 UTF-8（Claude Code 支持），请把母语触发词追加到你**已安装副本**的 `description:` 行——当触发词与你实际输入的语言一致时，基于描述的召回率会显著提高。可复制的中文触发词片段和其他语言的指引见 `learning-retrospective/references/localization.md`。
+仓库里的 `SKILL.md` 保持纯 ASCII，因为至少有一个技能校验器（Windows 上的 Codex `quick_validate.py`）用系统默认编码读文件，在 GBK 环境下遇到非 ASCII 字节会崩溃。优先使用 `--locale zh-CN`：安装器会把中文触发词写成 YAML `\uXXXX` 转义，YAML-aware agent 读取后仍得到中文，而磁盘文件保持纯 ASCII。手动添加和其他语言的指引见 `learning-retrospective/references/localization.md`。
 
 ### 钩子（可选，安装前先读安全说明）
 
 `learning-retrospective/hooks/` 里有 Claude Code 和 Codex 两个版本的可运行重试循环检测脚本，`learning-retrospective/tests/` 里有配套的自动化测试（只依赖标准库）：
 
 ```bash
-python learning-retrospective/tests/test_retry_loop_detector.py
+python -S -m unittest discover -s learning-retrospective/tests -v
 ```
 
 钩子是会在以后每次工具调用时运行的本地可执行代码——安装前请阅读 `SECURITY_NOTES.md`，审查脚本内容，注册后用一次故意失败做实机验证。各 harness 的注册步骤见 `learning-retrospective/references/hook-activation.md`。

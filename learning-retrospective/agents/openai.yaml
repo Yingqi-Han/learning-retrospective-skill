@@ -1,6 +1,6 @@
 interface:
   display_name: "Learning Retrospective"
-  short_description: "Never solve the same problem twice: capture verified lessons after hard-won successes and recall them before retrying."
+  short_description: "Capture verified lessons and stop repeated retry loops."
   default_prompt: "Use $learning-retrospective to check for a prior lesson on this failure, avoid verbatim retries, and capture the verified lesson after solving."
 policy:
   allow_implicit_invocation: true

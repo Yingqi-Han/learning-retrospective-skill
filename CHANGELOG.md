@@ -1,8 +1,16 @@
 # Changelog
 
+## 0.6.5 - 2026-07-10
+
+- Make installation genuinely transactional: copy, localize, and verify in an external staging directory before activation; keep timestamped backups outside active skill discovery; restore the previous install automatically if activation or final verification fails.
+- Run the complete unittest suite from `install.py`, including lesson-lint tests, instead of reporting success after hook tests alone. Verify the complete copied file manifest and required runtime files.
+- Keep localized `SKILL.md` files ASCII-safe: `--locale zh-CN` now emits Chinese trigger phrases as JSON-compatible YAML Unicode escapes, preserving Chinese semantics without breaking Windows GBK-default validators.
+- Harden both retry detectors: ignore payloads without session ids, tolerate malformed state types, write state atomically, remove state older than seven days, and emit reminders at 2, 4, 8... repeated failures instead of every retry. Tests now clean up their own state files.
+- Shorten `agents/openai.yaml` UI metadata to the recommended range. Upgrade GitHub Actions to Node 24-based `checkout@v6` and `setup-python@v6`, add read-only contents permission, and consolidate CI on full unittest discovery.
+
 ## 0.6.4 - 2026-07-09
 
-- Fix `lesson_lint.py --help`: the flag was treated as a file path and errored. The CLI now uses argparse with proper usage/help output; exit-code contract unchanged (0 clean, 1 findings, 2 usage error). Added a help-flag test (lint suite now 7 tests).
+- Fix `lesson_lint.py --help`: the flag was treated as a file path and errored. The CLI now uses argparse with proper usage/help output; exit-code contract unchanged (0 clean, 1 findings, 2 usage error). Added a help-flag test (lint suite now 6 tests).
 - Add a Release Verification section to `SECURITY_NOTES.md`: tags are annotated but not GPG-signed; strict environments should pin and review a commit SHA rather than trusting a tag name.
 
 

@@ -15,8 +15,37 @@ import json
 import os
 import sys
 import tempfile
+import time
 
 THRESHOLD = 2
+STATE_PREFIX = "codex-retry-loop-"
+STATE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+CLEANUP_INTERVAL_SECONDS = 24 * 60 * 60
+
+
+def cleanup_stale_state(temp_dir):
+    """Remove old detector state at most once per day; never block the hook."""
+    marker = os.path.join(temp_dir, f"{STATE_PREFIX}cleanup")
+    now = time.time()
+    try:
+        if os.path.exists(marker) and now - os.path.getmtime(marker) < CLEANUP_INTERVAL_SECONDS:
+            return
+        with open(marker, "a", encoding="utf-8"):
+            pass
+        os.utime(marker, None)
+        for name in os.listdir(temp_dir):
+            if not (name.startswith(STATE_PREFIX) and name.endswith(".json")):
+                continue
+            path = os.path.join(temp_dir, name)
+            if now - os.path.getmtime(path) > STATE_MAX_AGE_SECONDS:
+                os.remove(path)
+    except Exception:
+        pass
+
+
+def should_remind(count):
+    """Remind at 2, 4, 8... failures instead of spamming every retry."""
+    return count >= THRESHOLD and count & (count - 1) == 0
 
 try:
     raw = sys.stdin.buffer.read()
@@ -43,20 +72,29 @@ failed = exit_code is not None and exit_code != 0
 # Hash externally supplied values before using them in paths or keys:
 # session_id could contain path separators; the same command in two
 # different working directories is not the same action.
-session_raw = str(data.get("session_id") or "global")
+if not data.get("session_id"):
+    sys.exit(0)
+session_raw = str(data["session_id"])
 session_key = hashlib.sha1(session_raw.encode("utf-8", "replace")).hexdigest()[:12]
 cwd = str(data.get("cwd") or "")
 key = hashlib.sha1((cwd + "\n" + command).encode("utf-8", "replace")).hexdigest()[:12]
-state_path = os.path.join(tempfile.gettempdir(), f"codex-retry-loop-{session_key}.json")
+temp_dir = tempfile.gettempdir()
+cleanup_stale_state(temp_dir)
+state_path = os.path.join(temp_dir, f"{STATE_PREFIX}{session_key}.json")
 
 try:
     with open(state_path, encoding="utf-8") as f:
         state = json.load(f)
 except Exception:
     state = {}
+if not isinstance(state, dict):
+    state = {}
 
 if failed:
-    state[key] = state.get(key, 0) + 1
+    previous = state.get(key, 0)
+    if not isinstance(previous, int) or isinstance(previous, bool):
+        previous = 0
+    state[key] = previous + 1
 else:
     state.pop(key, None)
 
@@ -64,12 +102,17 @@ if len(state) > 200:  # cap state file growth
     state = {key: state.get(key, 0)} if key in state else {}
 
 try:
-    with open(state_path, "w", encoding="utf-8") as f:
+    pending_path = f"{state_path}.{os.getpid()}.tmp"
+    with open(pending_path, "w", encoding="utf-8") as f:
         json.dump(state, f)
+    os.replace(pending_path, state_path)
 except Exception:
-    pass
+    try:
+        os.remove(pending_path)
+    except Exception:
+        pass
 
-if state.get(key, 0) >= THRESHOLD:
+if should_remind(state.get(key, 0)):
     print(json.dumps({
         # systemMessage is shown to the USER in the UI; additionalContext is
         # injected into the MODEL's context. Both matter: an invisible

@@ -29,7 +29,7 @@ Goal: install the `learning-retrospective` skill from this repository into the u
    If the installer cannot be used, do the equivalent manually:
 
    ```bash
-   python learning-retrospective/tests/test_retry_loop_detector.py
+   python -S -m unittest discover -s learning-retrospective/tests -v
    # then copy learning-retrospective/ to:
    #   Codex:       ~/.codex/skills/learning-retrospective
    #   Claude Code: ~/.claude/skills/learning-retrospective
@@ -41,7 +41,7 @@ Goal: install the `learning-retrospective` skill from this repository into the u
    - `<target>/VERSION` exists and matches `learning-retrospective/VERSION` in the repo
    - `<target>/SECURITY_NOTES.md` exists
 
-4. Optional, recommended for non-English users: add native-language trigger phrases. For Chinese, prefer the installer flag `--locale zh-CN` (idempotent); for other languages follow `<target>/references/localization.md`. Ask the user which language they type in if unclear.
+4. Optional, recommended for non-English users: add native-language trigger phrases. For Chinese, prefer the installer flag `--locale zh-CN` (idempotent and ASCII-safe through YAML escapes); for other languages follow `<target>/references/localization.md`. Ask the user which language they type in if unclear.
 
 5. Report to the user: installed version, target path, test result, and that hooks were NOT installed.
 

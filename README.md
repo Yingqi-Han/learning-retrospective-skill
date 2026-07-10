@@ -36,13 +36,13 @@ The installer runs the test suite, copies the nested skill folder, and verifies 
 
 Useful flags:
 
-- `--locale zh-CN` — append Chinese trigger phrases to the installed description (better recall for Chinese users; see `references/localization.md`).
-- `--force` — update an existing install; the old copy is kept as a timestamped `.bak` folder.
+- `--locale zh-CN` — append Chinese trigger phrases as ASCII YAML escapes (better recall without breaking locale-default Windows validators; see `references/localization.md`).
+- `--force` — transactionally update an existing install; the old copy is kept in a timestamped backup directory outside active skill discovery.
 - `--uninstall` — remove the installed skill folder (hook scripts/registrations are never touched).
 - `--print-hook-config` — print the hook registration snippet with resolved local paths; writes nothing.
 - `--dry-run` — preview every path the installer would touch.
 
-To install a fixed version instead of latest `main`, check out the latest release tag first (`git tag --list`, then e.g. `git checkout v0.6.3`).
+To install a fixed version instead of latest `main`, check out the latest release tag first (`git tag --list`, then e.g. `git checkout v0.6.5`).
 
 Python: CI-tested on 3.10-3.14 (Linux/Windows/macOS); the code is kept 3.8-compatible by inspection, but EOL interpreters are not CI-tested.
 
@@ -95,14 +95,14 @@ If your agent does not support skill folders, paste `SKILL.md` into its custom i
 
 ### Localization of trigger phrases
 
-The repository copy of `SKILL.md` is ASCII-only because at least one skill validator (Codex `quick_validate.py` on Windows) reads files with the locale default encoding and crashes on non-ASCII bytes under a GBK locale. If you interact with your agent in another language and your harness handles UTF-8 (Claude Code does), append native-language trigger phrases to the `description:` line of your **installed** copy — description-based recall improves markedly when the trigger words match the language you actually type. See `learning-retrospective/references/localization.md` for a copy-paste Chinese addendum and guidance for other languages.
+The repository copy of `SKILL.md` is ASCII-only because at least one skill validator (Codex `quick_validate.py` on Windows) reads files with the locale default encoding and crashes on non-ASCII bytes under a GBK locale. Prefer `--locale zh-CN`: the installer writes Chinese triggers as YAML `\uXXXX` escapes, so YAML-aware agents recover the Chinese text while the file stays ASCII-compatible. See `learning-retrospective/references/localization.md` for manual and other-language guidance.
 
 ### Hooks (optional, read the security notes first)
 
 Runnable retry-loop detector scripts for Claude Code and Codex live in `learning-retrospective/hooks/`, with an automated test suite in `learning-retrospective/tests/` (stdlib-only):
 
 ```bash
-python learning-retrospective/tests/test_retry_loop_detector.py
+python -S -m unittest discover -s learning-retrospective/tests -v
 ```
 
 Hooks are executable local code that runs on every future tool call — read `SECURITY_NOTES.md` before installing, review the scripts, and verify with one forced live failure after registration. Registration steps per harness are in `learning-retrospective/references/hook-activation.md`.

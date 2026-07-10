@@ -12,10 +12,10 @@ Usage:
 
 What it does:
     1. Sanity-checks the repository (SKILL.md, VERSION present).
-    2. Runs the hook detector test suite.
+    2. Runs the complete stdlib-only test suite.
     3. Copies the nested learning-retrospective/ folder into the target
-       skills directory.
-    4. Verifies the installed copy.
+       skills directory through a verified staging directory.
+    4. Verifies the complete installed file manifest and version.
 
 What it deliberately does NOT do:
     - It never registers hooks or edits settings.json / hooks.json / any
@@ -30,6 +30,7 @@ Stdlib-only; works on Windows, macOS, and Linux. CI-tested on Python
 import argparse
 import datetime
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -37,7 +38,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent
 SKILL_SRC = REPO_ROOT / "learning-retrospective"
-TESTS = SKILL_SRC / "tests" / "test_retry_loop_detector.py"
+TESTS_DIR = SKILL_SRC / "tests"
 
 TARGETS = {
     "codex": Path.home() / ".codex" / "skills",
@@ -61,11 +62,35 @@ LOCALE_ADDENDA = {
 }
 LOCALE_MARKERS = {"zh-CN": "复盘"}
 DESC_ANCHOR = "retry loops. Do not use"
+REQUIRED_INSTALL_FILES = {
+    "SKILL.md",
+    "VERSION",
+    "SECURITY_NOTES.md",
+    "agents/openai.yaml",
+    "hooks/retry-loop-detector-codex.py",
+    "hooks/retry-loop-detector-claude.py",
+    "scripts/lesson_lint.py",
+    "tests/test_retry_loop_detector.py",
+    "tests/test_lesson_lint.py",
+}
 
 
 def fail(msg):
     print(f"ERROR: {msg}")
     sys.exit(1)
+
+
+def parse_description_line(line):
+    """Decode either a plain YAML scalar or our JSON-compatible quoted scalar."""
+    raw_description = line.split(":", 1)[1].strip()
+    if raw_description.startswith('"'):
+        try:
+            return json.loads(raw_description)
+        except (ValueError, TypeError) as exc:
+            raise RuntimeError(
+                "installed description is not valid JSON/YAML quoted text"
+            ) from exc
+    return raw_description
 
 
 def print_hook_config(agent):
@@ -98,25 +123,82 @@ def print_hook_config(agent):
 
 
 def apply_locale(dest, locale):
-    """Append native-language trigger phrases to the installed description line."""
+    """Append localized triggers while keeping SKILL.md ASCII on disk."""
     addendum = LOCALE_ADDENDA[locale]
     skill_md = dest / "SKILL.md"
     text = skill_md.read_text(encoding="utf-8")
     lines = text.splitlines()
     for i, line in enumerate(lines):
         if line.startswith("description:"):
-            if LOCALE_MARKERS[locale] in line:
+            description = parse_description_line(line)
+            if LOCALE_MARKERS[locale] in description:
                 print(f"Locale {locale}: trigger phrases already present, skipping.")
                 return
-            if DESC_ANCHOR in line:
-                lines[i] = line.replace("retry loops. Do not use",
-                                        f"retry loops{addendum}. Do not use", 1)
+            if DESC_ANCHOR in description:
+                description = description.replace(
+                    "retry loops. Do not use",
+                    f"retry loops{addendum}. Do not use",
+                    1,
+                )
             else:
-                lines[i] = line.rstrip() + addendum
-            skill_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            print(f"Locale {locale}: appended trigger phrases to installed description.")
+                description = description.rstrip() + addendum
+            # JSON double-quoted strings are valid YAML double-quoted scalars.
+            # ensure_ascii keeps Windows locale-default validators from failing.
+            lines[i] = "description: " + json.dumps(description, ensure_ascii=True)
+            skill_md.write_text("\n".join(lines) + "\n", encoding="ascii")
+            print(f"Locale {locale}: appended trigger phrases as ASCII YAML escapes.")
             return
-    fail("could not find the description line in the installed SKILL.md.")
+    raise RuntimeError("could not find the description line in the installed SKILL.md")
+
+
+def install_files(root):
+    """Return copied file paths relative to root, excluding Python caches."""
+    return {
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file()
+        and "__pycache__" not in path.parts
+        and path.suffix not in {".pyc", ".pyo"}
+    }
+
+
+def verify_install(dest, version):
+    """Verify the complete manifest, core files, version, and UTF-8 frontmatter."""
+    actual_files = install_files(dest)
+    expected_files = install_files(SKILL_SRC)
+    if actual_files != expected_files:
+        missing = sorted(expected_files - actual_files)
+        extra = sorted(actual_files - expected_files)
+        raise RuntimeError(f"file manifest mismatch; missing={missing}, extra={extra}")
+    missing_required = sorted(REQUIRED_INSTALL_FILES - actual_files)
+    if missing_required:
+        raise RuntimeError(f"required files missing: {missing_required}")
+    installed_version = (dest / "VERSION").read_text(encoding="utf-8").strip()
+    if installed_version != version:
+        raise RuntimeError(
+            f"installed VERSION {installed_version} does not match source {version}"
+        )
+    skill_text = (dest / "SKILL.md").read_text(encoding="utf-8")
+    if not skill_text.startswith("---\n") or "\nname: learning-retrospective\n" not in skill_text:
+        raise RuntimeError("SKILL.md frontmatter is missing or malformed")
+    description_line = next(
+        (line for line in skill_text.splitlines() if line.startswith("description:")),
+        "",
+    )
+    if not description_line.split(":", 1)[1].strip():
+        raise RuntimeError("SKILL.md description is empty")
+    print(
+        f"Verified: complete {len(actual_files)}-file manifest, VERSION "
+        f"({installed_version}), and UTF-8 frontmatter."
+    )
+
+
+def backup_root_for(agent, skills_dir):
+    """Keep backups outside the active skills discovery directory."""
+    if agent in TARGETS:
+        return Path.home() / f".{agent}" / "skill-backups"
+    name = skills_dir.name or "agent-skills"
+    return skills_dir.parent / f".{name}-backups"
 
 
 def main():
@@ -177,8 +259,12 @@ def main():
     if args.skip_tests:
         print("WARNING: skipping tests; install may succeed even if hook scripts are broken.")
     else:
-        print("Running hook detector tests...")
-        result = subprocess.run([sys.executable, str(TESTS)], capture_output=True, text=True)
+        print("Running complete test suite...")
+        result = subprocess.run(
+            [sys.executable, "-S", "-m", "unittest", "discover", "-s", str(TESTS_DIR), "-v"],
+            capture_output=True,
+            text=True,
+        )
         if result.returncode != 0:
             print(result.stdout)
             print(result.stderr)
@@ -191,11 +277,14 @@ def main():
     else:
         skills_dir = TARGETS[args.agent]
     dest = skills_dir / "learning-retrospective"
+    backup_root = backup_root_for(args.agent, skills_dir)
 
     print(f"Target skills directory: {skills_dir}")
     print(f"Target skill path: {dest}")
     if dest.exists():
         print(f"Existing install: yes ({'would overwrite' if args.force else 'would refuse without --force'})")
+        if args.force:
+            print(f"Backup directory: {backup_root} (outside active skills discovery)")
     else:
         print("Existing install: no")
     if args.with_hooks and args.agent != "project":
@@ -211,43 +300,58 @@ def main():
         print("Done.")
         return
 
-    if dest.exists():
-        if not args.force:
-            fail(f"{dest} already exists. Re-run with --force to update (the old copy "
-                 "is kept as a timestamped .bak folder). Local edits such as localized "
-                 "trigger phrases can be re-applied with --locale.")
-        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        backup = dest.with_name(f"learning-retrospective.bak-{stamp}")
-        dest.rename(backup)
-        print(f"Existing install backed up to {backup}")
-        old_skill = backup / "SKILL.md"
-        if old_skill.is_file() and args.locale is None:
-            old_desc = next((l for l in old_skill.read_text(encoding="utf-8").splitlines()
-                             if l.startswith("description:")), "")
-            if any(m in old_desc for m in LOCALE_MARKERS.values()):
-                print("NOTE: the previous copy had localized trigger phrases in its "
-                      "description. Re-apply them with --locale (e.g. --locale zh-CN) "
-                      "or copy the line from the backup.")
-    skills_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(
-        SKILL_SRC,
-        dest,
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
-    )
-    print(f"Copied skill to {dest}")
+    if dest.exists() and not args.force:
+        fail(f"{dest} already exists. Re-run with --force to update (the old copy "
+             "is kept outside the active skills directory). Local edits such as localized "
+             "trigger phrases can be re-applied with --locale.")
 
-    # 4. Verify
-    for rel in ("SKILL.md", "VERSION", "SECURITY_NOTES.md"):
-        if not (dest / rel).is_file():
-            fail(f"verification failed: {dest / rel} missing after copy.")
-    installed_version = (dest / "VERSION").read_text(encoding="utf-8").strip()
-    if installed_version != version:
-        fail(f"verification failed: installed VERSION {installed_version} != {version}.")
-    print(f"Verified: SKILL.md, VERSION ({installed_version}), SECURITY_NOTES.md present.")
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    backup = backup_root / f"learning-retrospective.bak-{stamp}"
+    staging = backup_root / f".learning-retrospective.staging-{stamp}-{os.getpid()}"
+    moved_old = False
+    activated = False
+    backup_root.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copytree(
+            SKILL_SRC,
+            staging,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+        )
+        if args.locale:
+            apply_locale(staging, args.locale)
+        verify_install(staging, version)
 
-    # 4b. Optional trigger-phrase localization
-    if args.locale:
-        apply_locale(dest, args.locale)
+        skills_dir.mkdir(parents=True, exist_ok=True)
+        if dest.exists():
+            old_skill = dest / "SKILL.md"
+            if old_skill.is_file() and args.locale is None:
+                old_desc = next(
+                    (line for line in old_skill.read_text(encoding="utf-8").splitlines()
+                     if line.startswith("description:")),
+                    "",
+                )
+                old_description = parse_description_line(old_desc) if old_desc else ""
+                if any(marker in old_description for marker in LOCALE_MARKERS.values()):
+                    print("NOTE: the previous copy had localized trigger phrases. "
+                          "Re-apply them with --locale (e.g. --locale zh-CN).")
+            dest.rename(backup)
+            moved_old = True
+            print(f"Existing install backed up outside active skills to {backup}")
+        staging.rename(dest)
+        activated = True
+        print(f"Activated verified skill at {dest}")
+        verify_install(dest, version)
+    except Exception as exc:
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
+        if moved_old and backup.exists():
+            if dest.exists():
+                shutil.rmtree(dest, ignore_errors=True)
+            backup.rename(dest)
+            print(f"Restored previous install after update failure: {dest}")
+        elif activated and dest.exists():
+            shutil.rmtree(dest, ignore_errors=True)
+        fail(f"transactional install failed: {exc}")
 
     # 5. Hooks: copy only, never register
     if args.with_hooks:

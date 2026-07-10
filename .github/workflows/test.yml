@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     strategy:
@@ -17,20 +20,22 @@ jobs:
         python-version: ["3.10", "3.12", "3.14"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Hook detector tests
-        run: python learning-retrospective/tests/test_retry_loop_detector.py
-      - name: Lesson lint tests
-        run: python learning-retrospective/tests/test_lesson_lint.py
+      - name: Complete test suite
+        run: python -S -m unittest discover -s learning-retrospective/tests -v
       - name: Installer end-to-end (project target)
         run: |
           python install.py --agent project --target ./tmp-skills
           python install.py --agent project --target ./tmp-skills --dry-run --skip-tests
           python install.py --agent project --target ./tmp-skills --force --skip-tests --locale zh-CN
+          python -c "from pathlib import Path; p=Path('tmp-skills/learning-retrospective/SKILL.md'); text=p.read_text(encoding='ascii'); assert '\\u590d\\u76d8' in text"
+          test ! -d ./tmp-skills/learning-retrospective.bak-*
+          test -d ./.tmp-skills-backups
           python install.py --agent project --target ./tmp-skills --uninstall
+          rm -rf ./.tmp-skills-backups
         shell: bash
       - name: Installer prints hook config without writing
         run: python install.py --agent claude --print-hook-config

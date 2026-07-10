@@ -5,8 +5,8 @@ The core weakness of any retrospective skill is the trigger paradox: it relies o
 The pattern is harness-agnostic:
 
 1. Observe tool executions (command, success/failure).
-2. Keep a small rolling state of recent failures.
-3. When the same action fails twice **verbatim**, inject a reminder into the agent's context.
+2. Keep a small rolling state of recent failures and expire stale state.
+3. When the same action fails twice **verbatim**, inject a reminder into the agent's context. If the retry continues, remind again only at exponentially spaced counts (4, 8, 16...) to avoid flooding the user and model.
 
 Calibrate the reminder to the skill's two modes: it must not suppress legitimate exploration of a novel problem. Verbatim-identical retries are the one behavior that is almost never productive, which is why they are the trigger; but the injected message should say "check memory for a prior lesson; if none, keep exploring with a changed hypothesis and capture the lesson after solving," not "stop working on this."
 
@@ -19,7 +19,7 @@ Two verified facts shaped the design:
 - `PostToolUse` fires only on **successful** tool calls; failures fire `PostToolUseFailure`. A single-event heuristic that parses `tool_response` for error strings never sees real failures. Register the same script on **both** events: failure increments the counter, success resets it - no fragile output parsing needed.
 - On Windows, hook commands may run through Git Bash, whose PATH can lack `python` even when PowerShell finds it. Use the exec form (`command` + `args`, no shell) with the interpreter's full path. Prefer `python -S` for this stdlib-only detector to avoid site-package startup overhead.
 
-The runnable script is `../hooks/retry-loop-detector-claude.py` (stdlib-only, tested by `../tests/test_retry_loop_detector.py`). Copy it to `~/.claude/hooks/` and review it before registering — see `../SECURITY_NOTES.md`.
+The runnable script is `../hooks/retry-loop-detector-claude.py` (stdlib-only, covered by the complete unittest suite). Copy it to `~/.claude/hooks/` and review it before registering — see `../SECURITY_NOTES.md`.
 
 Register it in `~/.claude/settings.json` (exec form; substitute your interpreter path):
 
@@ -58,7 +58,7 @@ Register it in `~/.claude/settings.json` (exec form; substitute your interpreter
 
 Verification procedure (do this once before trusting it):
 
-1. Run the automated suite: `python learning-retrospective/tests/test_retry_loop_detector.py` (covers fail/fail/reset sequences, BOM input, non-Bash tools, garbage input).
+1. Run the automated suite: `python -S -m unittest discover -s learning-retrospective/tests -v` (covers fail/fail/reset sequences, backoff, missing session ids, BOM input, non-Bash tools, and garbage input).
 2. Run one harmless failing command twice in a live session and confirm the reminder appears.
 
 Notes:
@@ -66,6 +66,7 @@ Notes:
 - Detection is exact-command-match only; paraphrased retries of the same broken approach are not caught - that remains the skill's job once activated.
 - Keep the injected reminder short. Its only job is to break the loop and hand control to the skill.
 - The state file is scoped per session id, so parallel sessions do not interfere.
+- State files older than seven days are removed by a best-effort daily cleanup; missing session ids fail safe without counting.
 
 ## Codex Example (config validated 2026-07-09)
 
@@ -96,7 +97,7 @@ Codex supports lifecycle hooks in `~/.codex/hooks.json` (or inline `[hooks]` tab
 }
 ```
 
-The runnable script is `../hooks/retry-loop-detector-codex.py`. It treats a missing `exit_code` as success rather than failure - a false reminder on every tool call is worse than a missed one, so a renamed field silently disables detection instead of spamming. Verify with the same two-step gate: run `../tests/test_retry_loop_detector.py` (its Codex cases cover fail/fail/reset and the missing-exit-code fail-safe), then force one real failure in a live session after trusting the hook.
+The runnable script is `../hooks/retry-loop-detector-codex.py`. It treats a missing `exit_code` as success rather than failure - a false reminder on every tool call is worse than a missed one, so a renamed field silently disables detection instead of spamming. It also requires a session id, expires state older than seven days, and backs reminders off at 2, 4, 8... failures. Verify with the same two-step gate: run the complete suite (`python -S -m unittest discover -s learning-retrospective/tests -v`), then force one real failure twice in a live session after trusting the hook.
 
 ## Verifying the Current Hook Schema
 
