@@ -1,5 +1,68 @@
 # Changelog
 
+## 0.8.0 - 2026-07-24
+
+- Bind every semantic review request to a privacy-safe
+  `HOOK_EVIDENCE_MANIFEST` generated from actual hook payloads. The manifest
+  carries a request id, ordered event indexes, command signatures, and
+  structured/unknown outcomes without storing raw commands or output.
+- Require the main agent to build `REVIEW_PACKET_V1` by copying relevant raw
+  tool-event fields instead of replacing them with an unverifiable free-form
+  summary.
+- Split semantic triage from lesson verification: the isolated child reports
+  failure-family similarity, while `known_loop` now requires a source-labelled
+  prior lesson and `prior_lesson_verified=true`. The direct Codex backend has no
+  memory access and therefore cannot interrupt a task on its own.
+- Stop conflating no-write and no-tool guarantees. Distinguish
+  `enforced_no_tools`, `enforced_read_only`, and `prompt_only`, and use
+  non-inherited task context when available.
+- Extend the reviewer schema with `schema_version`, `request_id`,
+  `evidence_adequate`, and `reviewer_isolation`. Retry malformed output once
+  with the same reviewer, then apply a request-bound fail-closed result.
+- Require a non-empty `reviewer_agent_id` from the actual spawn call and a wait
+  on exactly that id. Empty-target waits and missing spawn traces now degrade to
+  `reviewer_unavailable` instead of being reported as reviewer conclusions.
+- Add manifest provenance, ordering, outcome, privacy, and reviewer-protocol
+  assertions to the hook test suite.
+- Add an explicit opt-in Codex CLI reviewer backend. It reconstructs a bounded
+  evidence packet from the actual parent rollout, redacts common credential
+  shapes, launches the configured model in a temporary user-context-isolated
+  Codex home with tool-bearing features disabled, a read-only sandbox, and a
+  strict output schema. It rejects unexpected tool traces, captures the runtime
+  thread id, and injects the validated result without relying on main-agent
+  compliance.
+- Harden the backend after adversarial review: cover API keys, AWS keys,
+  authenticated URLs, cookies, npm tokens, JWTs, and private keys; normalize
+  command/cwd signatures across hook and rollout sources; derive exit status
+  only from anchored Codex shell envelopes; require two failed tool events for
+  an activity-mode `known_loop`; cap model time at 45 seconds; and terminate
+  the reviewer process group on timeout.
+- Make `--with-hooks` transactional with staging, verification, detector-last
+  activation, rollback tests, and backups outside the active hooks directory.
+  Correct the documentation examples to use 5 seconds for Claude's lightweight
+  detector and 60 seconds for the opt-in Codex model path.
+- Keep `main_agent` as the portable public default. The installer copies the
+  new backend, preserves local activation settings, and prints a 60-second
+  Codex hook timeout suitable for the opt-in model call.
+
+## 0.7.1 - 2026-07-24
+
+- Fix Codex hooks on Windows: add a `commandWindows` override with PowerShell's `&` call operator. A quoted executable path without `&` exited before Python started, producing the misleading `hook exited with code 1` UI state.
+- Add a Codex compatibility fallback for builds such as `0.145.0` that expose `tool_response` as output text without a structured exit code. The detector never parses command output to guess success; it requests semantic review after an exact command repeats or after a bounded six-call activity window.
+- Preserve deterministic failure counting on harness versions that do provide structured exit codes, while keeping the public reviewer contract vendor-neutral.
+- Add privacy-safe malformed-stdin diagnostics and Codex activity-fallback tests. The complete stdlib-only suite now has 32 tests.
+- Require an actual fresh read-only subagent when the harness exposes multi-agent tools, name Codex's SpawnAgent/collaboration surface explicitly, provide an exact fail-closed replacement for invalid or internally inconsistent reviewer JSON, and exclude user-requested probes from loop classification.
+- Reject boolean pseudo-exit-codes instead of accepting them as integers in Python payloads.
+- Correct Codex trust guidance: Desktop Hooks settings and CLI/TUI `/hooks` are different surfaces, enablement is not trust, and `hooks/list` is the authoritative diagnostic for `currentHash` and `trustStatus`.
+
+## 0.7.0 - 2026-07-24
+
+- Add two-tier retry detection: exact repeated failures still trigger deterministic reminders at counts 2, 4, 8..., while three failures across at least two command signatures in the latest six Bash calls request a bounded semantic review.
+- Add a vendor-neutral, read-only secondary-agent classification contract that distinguishes `known_loop`, `novel_exploration`, `routine_failure`, and `uncertain`; interrupt only high-confidence known loops.
+- Add optional local reviewer preferences (`preferred_model`, reasoning effort, confidence threshold) without making any model or vendor a public dependency. Hooks never launch model processes directly.
+- Add semantic-review tests for both Claude Code and Codex, including configured-model routing, cooldown behavior, and a privacy check that raw commands are not injected by the hook.
+- Add privacy-safe Codex hook diagnostics and fail-open handling for malformed payloads or internal detector errors.
+
 ## 0.6.6 - 2026-07-10
 
 - Fix the cross-platform CI assertion for ASCII-safe localized descriptions. The original one-line YAML/Bash/Python command lost one backslash layer under Bash and compared decoded Chinese text against escaped on-disk text, even though all 20 tests and installer operations had passed. Use an ASCII-only Python here-document and construct the decoded trigger from Unicode code points, avoiding both multi-layer escaping and shell-specific source encoding.

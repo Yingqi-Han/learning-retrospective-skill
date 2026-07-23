@@ -54,6 +54,13 @@ HOOK_SCRIPTS = {
     "codex": "retry-loop-detector-codex.py",
     "claude": "retry-loop-detector-claude.py",
 }
+HOOK_SUPPORT_FILES = {
+    "codex": ["retry-reviewer-codex-cli.py"],
+    "claude": [],
+}
+REVIEW_CONFIG_EXAMPLE = "reviewer-config.example.json"
+INSTALLED_REVIEW_CONFIG_EXAMPLE = "learning-retrospective-reviewer.example.json"
+ACTIVE_REVIEW_CONFIG = "learning-retrospective-reviewer.json"
 
 # Keep in sync with references/localization.md.
 LOCALE_ADDENDA = {
@@ -69,8 +76,13 @@ REQUIRED_INSTALL_FILES = {
     "agents/openai.yaml",
     "hooks/retry-loop-detector-codex.py",
     "hooks/retry-loop-detector-claude.py",
+    "hooks/retry-reviewer-codex-cli.py",
+    "hooks/reviewer-config.example.json",
+    "references/semantic-review.md",
     "scripts/lesson_lint.py",
     "tests/test_retry_loop_detector.py",
+    "tests/test_codex_reviewer_runner.py",
+    "tests/test_installer.py",
     "tests/test_lesson_lint.py",
 }
 
@@ -109,11 +121,16 @@ def print_hook_config(agent):
         }}
         target = "~/.claude/settings.json (merge under existing keys)"
     else:
+        windows_command = f'& "{interpreter}" -S "{script}"'
         snippet = {"hooks": {"PostToolUse": [{"matcher": "^Bash$", "hooks": [{
             "type": "command",
             "command": f'"{interpreter}" -S "{script}"',
-            "timeout": 5}]}]}}
-        target = "~/.codex/hooks.json (then trust it via /hooks inside Codex)"
+            "commandWindows": windows_command,
+            "timeout": 60}]}]}}
+        target = (
+            "~/.codex/hooks.json (then review and trust the current hook hash "
+            "in the Codex surface; /hooks is CLI/TUI-specific)"
+        )
     print(f"Proposed hook registration for {agent} - review, then merge manually into {target}:")
     print(json.dumps(snippet, indent=2))
     if not (HOOK_DIRS[agent] / HOOK_SCRIPTS[agent]).is_file():
@@ -201,13 +218,88 @@ def backup_root_for(agent, skills_dir):
     return skills_dir.parent / f".{name}-backups"
 
 
+def hook_backup_root_for(agent):
+    """Keep hook rollback copies outside the active hooks directory."""
+    return Path.home() / f".{agent}" / "hook-backups"
+
+
+def install_hook_files(agent, hook_dir, backup_root, stamp):
+    """Stage, verify, and transactionally replace one harness's hook files."""
+    hook_dir = Path(hook_dir)
+    backup_root = Path(backup_root)
+    staging = backup_root / f".learning-retrospective-hooks.staging-{stamp}-{os.getpid()}"
+    backup = backup_root / f"learning-retrospective-hooks.bak-{stamp}"
+    active_config = hook_dir / ACTIVE_REVIEW_CONFIG
+    active_config_preserved = active_config.exists()
+
+    pairs = []
+    for source_name in HOOK_SUPPORT_FILES[agent]:
+        pairs.append((SKILL_SRC / "hooks" / source_name, hook_dir / source_name))
+    pairs.append((
+        SKILL_SRC / "hooks" / REVIEW_CONFIG_EXAMPLE,
+        hook_dir / INSTALLED_REVIEW_CONFIG_EXAMPLE,
+    ))
+    if not active_config_preserved:
+        pairs.append((
+            SKILL_SRC / "hooks" / REVIEW_CONFIG_EXAMPLE,
+            active_config,
+        ))
+    # Switch the detector last so an old detector never calls a half-updated
+    # support bundle.
+    script = HOOK_SCRIPTS[agent]
+    pairs.append((SKILL_SRC / "hooks" / script, hook_dir / script))
+
+    hook_dir.mkdir(parents=True, exist_ok=True)
+    backup_root.mkdir(parents=True, exist_ok=True)
+    staging.mkdir()
+    replaced = []
+    backed_up = set()
+    try:
+        for source, target in pairs:
+            staged = staging / target.name
+            shutil.copy2(source, staged)
+            if staged.read_bytes() != source.read_bytes():
+                raise RuntimeError(f"staged hook verification failed: {target.name}")
+
+        existing = [target for _, target in pairs if target.exists()]
+        if existing:
+            backup.mkdir()
+            for target in existing:
+                shutil.copy2(target, backup / target.name)
+                backed_up.add(target.name)
+
+        for source, target in pairs:
+            staged = staging / target.name
+            os.replace(str(staged), str(target))
+            replaced.append(target)
+            if target.read_bytes() != source.read_bytes():
+                raise RuntimeError(f"activated hook verification failed: {target.name}")
+    except Exception:
+        for target in reversed(replaced):
+            rollback = backup / target.name
+            if target.name in backed_up and rollback.is_file():
+                shutil.copy2(rollback, target)
+            elif target.exists():
+                target.unlink()
+        raise
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+    return {
+        "targets": [target for _, target in pairs],
+        "active_config": active_config,
+        "active_config_preserved": active_config_preserved,
+        "backup": backup if backup.exists() else None,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--agent", required=True, choices=["codex", "claude", "project"])
     parser.add_argument("--target", default=None,
                         help="skills directory for --agent project (default ./.agent-skills)")
     parser.add_argument("--with-hooks", action="store_true",
-                        help="also copy (never register) the hook detector script")
+                        help="also copy (never register) the hook detector and reviewer config example")
     parser.add_argument("--force", action="store_true",
                         help="overwrite an existing installed copy")
     parser.add_argument("--skip-tests", action="store_true",
@@ -290,6 +382,11 @@ def main():
     if args.with_hooks and args.agent != "project":
         script = HOOK_SCRIPTS[args.agent]
         print(f"Hook script copy target: {HOOK_DIRS[args.agent] / script} (registration remains manual)")
+        print("Reviewer config example target: "
+              f"{HOOK_DIRS[args.agent] / INSTALLED_REVIEW_CONFIG_EXAMPLE}")
+        active_config = HOOK_DIRS[args.agent] / ACTIVE_REVIEW_CONFIG
+        print(f"Active reviewer config target: {active_config} "
+              f"({'would preserve' if active_config.exists() else 'would create with defaults'})")
     elif args.with_hooks:
         print("Hook script copy target: none (hooks are per-user, not per-project)")
     else:
@@ -359,14 +456,35 @@ def main():
             print("Hooks are per-user, not per-project; re-run with --agent codex|claude for hooks.")
         else:
             hook_dir = HOOK_DIRS[args.agent]
-            hook_dir.mkdir(parents=True, exist_ok=True)
+            result = install_hook_files(
+                args.agent,
+                hook_dir,
+                hook_backup_root_for(args.agent),
+                stamp,
+            )
             script = HOOK_SCRIPTS[args.agent]
-            shutil.copy2(SKILL_SRC / "hooks" / script, hook_dir / script)
-            print(f"Copied hook script to {hook_dir / script} (NOT registered).")
+            print(
+                f"Transactionally installed hook script to "
+                f"{hook_dir / script} (NOT registered)."
+            )
+            for support_file in HOOK_SUPPORT_FILES[args.agent]:
+                print(f"Copied hook support file to {hook_dir / support_file}.")
+            print("Copied optional reviewer config example to "
+                  f"{hook_dir / INSTALLED_REVIEW_CONFIG_EXAMPLE}.")
+            active_config = result["active_config"]
+            if active_config.exists():
+                print(f"Active reviewer config available at {active_config}; "
+                      "existing preferences were preserved.")
+            if result["backup"]:
+                print(f"Previous hook files backed up to {result['backup']}.")
             print("Next steps (manual, after reading SECURITY_NOTES.md):")
             print(f"  - Registration snippet: {dest / 'references' / 'hook-activation.md'}")
             if args.agent == "codex":
-                print("  - Codex additionally requires trusting the hook via /hooks in the app.")
+                print(
+                    "  - Codex additionally requires trusting the current hook hash. "
+                    "The Desktop Hooks panel and CLI/TUI /hooks flow differ; an "
+                    "enabled switch alone does not prove trust."
+                )
     else:
         print("Hooks not installed (default). Use --with-hooks to copy the script; "
               "registration is always manual - read SECURITY_NOTES.md first.")

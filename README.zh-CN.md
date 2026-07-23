@@ -16,11 +16,11 @@
 
 - 在来之不易的成功之后自动捕获教训（两次以上失败、非显然的变通方案、机器特有的事实）——这是主要模式。
 - 在重新推导修复方案之前先查记忆里有没有已有教训，并把问题分类为"已知"或"新"。
-- 检测一字不改的重试循环，在继续切换工具之前强制做一次证据盘点。
+- 检测完全相同的重试循环，并把短时间内多个不同命令的连续失败交给有边界的语义审查器判断。
 - 在展开大范围排查之前设置明确的失败门（failure gate）。
 - 只捕获已验证、可复用的教训。
 - 把教训写入正确的层级：用户级记忆、项目级记忆或技能更新。
-- 可选地请任何可用的第二审阅者（agent 或模型）做有边界的审计。
+- 可选地请任意可用的快速第二审阅者区分“已知循环”和“持续产生新证据的合理探索”。
 - 可选地通过 harness 钩子（hook）自动激活：检测到重复失败时注入提醒（见 `learning-retrospective/references/hook-activation.md`；其中 Claude Code 检测器已于 2026-07-09 实机部署并验证）。
 
 ## 快速开始
@@ -105,13 +105,17 @@ cp -r ./learning-retrospective ./.agent-skills/
 python -S -m unittest discover -s learning-retrospective/tests -v
 ```
 
-钩子是会在以后每次工具调用时运行的本地可执行代码——安装前请阅读 `SECURITY_NOTES.md`，审查脚本内容，注册后用一次故意失败做实机验证。各 harness 的注册步骤见 `learning-retrospective/references/hook-activation.md`。
+钩子是会在以后每次工具调用时运行的本地可执行代码——安装前请阅读 `SECURITY_NOTES.md`，审查脚本内容，注册后用一次真实候选触发做实机验证。各 harness 的注册步骤见 `learning-retrospective/references/hook-activation.md`。
+
+检测器采用两层机制：能够提供结构化失败状态的 harness 保留确定性的重复失败提醒；对于只提供输出文本的 Codex 版本，检测器不会根据错误关键词猜测成功或失败，而是在命令精确重复或达到有限 shell 活动窗口时请求一次受证据约束的语义审查。钩子会附带它从真实工具事件中生成的隐私安全清单。协议会分别标记“技术上禁用工具”“文件系统只读”和“仅靠提示词约束”，不会再把三者混为一谈。
+
+公开默认值是 `review_backend: "main_agent"`，不会自行启动模型进程。Codex 用户可以在本机配置中显式启用 `review_backend: "codex_cli"`：该后端读取父任务有限长度的 JSONL 尾部、脱敏常见凭据形式，在临时 `CODEX_HOME` 中启动一个真实 Codex 子任务，并在模型调用前关闭 shell、网页、浏览器和 MCP 类工具入口，同时启用 `--sandbox read-only` 和严格输出 schema，记录运行时 `thread_id`，再把验证后的结果直接注入主任务。临时 Home 仅在调用期间复制文件型 Codex 登录凭据，不继承用户 skills、hooks、rules 或 memory；Codex 内置系统上下文仍然存在。因此子任务只负责语义分流，例如判断是否属于同一失败家族，不会假装知道长期记忆。主代理随后执行一次有边界的经验检索，只有找到并引用仍适用、带来源的经验时，才能把结果升级为 `known_loop`。启用前需把 Codex Hook 超时提高到 60 秒。`install.py --with-hooks` 会事务式复制该后端，并保留用户现有配置。详见 `learning-retrospective/references/semantic-review.md`。
 
 ## 兼容性
 
 | Agent | 测试状态 | 安装位置 | 说明 |
 |---|---:|---|---|
-| Codex | 已验证：结构校验 + 子代理实测（Windows 11，Codex 桌面版 26.623.141536，2026-07-09） | `~/.codex/skills/` | 使用 `SKILL.md` frontmatter 和可选的 `agents/openai.yaml`；为兼容 Windows 校验器请保持 `SKILL.md` 纯 ASCII。钩子配置已通过管道测试；钩子字段形状是经验观察，升级后需重测。 |
+| Codex | 已验证：结构校验 + 子代理实测（Windows 11；2026-07-24 使用可选快速审阅模型复测语义分类） | `~/.codex/skills/` | 使用 `SKILL.md` frontmatter 和可选的 `agents/openai.yaml`；为兼容 Windows 校验器请保持 `SKILL.md` 纯 ASCII。钩子字段形状是经验观察，升级或修改后需要重测并重新信任。 |
 | Claude Code | 已验证：部署并被发现（Windows 11，2026-07-09） | `~/.claude/skills/` | 复制文件夹即可；技能从 `SKILL.md` frontmatter 实时发现，无需重启。`agents/openai.yaml` 会被忽略。基于钩子的自动激活同日实机验证——见 `references/hook-activation.md`。 |
 | Cursor | 尚未测试 | rules 或自定义指令 | 粘贴 `SKILL.md`；需要时手动加载 references。 |
 | Cline | 尚未测试 | `.clinerules` 或 memory bank | 若不支持技能文件夹，可作为纯 Markdown 工作流指导使用。 |

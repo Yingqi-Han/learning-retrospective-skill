@@ -23,6 +23,8 @@ The capture must happen while the evidence is still in context: exact commands, 
 Trigger a retrospective when one or more signals appear:
 
 - The same command, test, conversion, install, API call, or UI action fails twice.
+- Several different commands fail within one short window while pursuing the
+  same goal or switching tools without a new hypothesis.
 - The agent starts broad discovery after a verified local fact should have been checked.
 - The agent switches tools repeatedly without a new hypothesis.
 - The user says the agent is looping, forgot prior work, or should remember the lesson.
@@ -62,6 +64,9 @@ Before writing to user memory, repository docs, project rules, or another skill:
    - If nothing covers it, this is a novel problem: continue exploring with varied hypotheses, and plan to capture the lesson after resolution.
    - List what is already verified, including paths, versions, commands, outputs, and files.
    - Prefer cheap verification of drift-prone facts over assumptions.
+   - If a hook reported a semantic retry candidate, treat it as a request for
+     review, not proof of a loop. Use the bounded classifier in
+     `references/semantic-review.md` before interrupting novel exploration.
 
 3. Choose one next hypothesis.
    - Pick the smallest command or edit that directly tests the leading hypothesis.
@@ -89,14 +94,24 @@ Before writing to user memory, repository docs, project rules, or another skill:
 
 7. Optionally ask an independent reviewer.
    - Use any available secondary agent, model, reviewer prompt, or fresh session; do not require a specific vendor or model.
-   - Give it only the artifact paths, the failed loop summary, and the concrete validation questions.
+   - Give it the smallest task-specific packet: artifact paths, the failed loop summary, and concrete validation questions. Do not claim that this removes built-in system context.
    - Ask for the smallest safety or clarity improvement.
+   - For a semantic retry candidate, prefer enforced tool denial. A read-only
+     filesystem alone still permits reads and commands, so report it separately.
+     Otherwise use a fresh, non-inherited, prompt-only non-tool reviewer and
+     report that weaker isolation honestly.
+     Require the evidence-bound contract in `references/semantic-review.md`.
+     Let the reviewer identify a shared failure family, but require a bounded
+     main-agent lookup of source-labelled prior lessons before promoting it to
+     `known_loop`. Interrupt only a high-confidence known loop with a verified,
+     still-applicable lesson; let evidence-producing `novel_exploration`
+     continue.
    - If no subagent exists, run the same checklist yourself.
    - See `references/reviewer-prompt.md`.
 
 ## Automatic Activation
 
-This skill is normally recalled through its description, which is weakest exactly when an agent is mid-loop. If your harness supports hooks or tool-event callbacks, wire a repeated-failure detector that injects a reminder to invoke this skill. Runnable detector scripts live in `hooks/` (Claude Code and Codex variants) with an automated test suite in `tests/`; see `references/hook-activation.md` for registration, trust requirements, and the general pattern for other harnesses. Treat any hook config you write as an artifact under this skill's own rules: run the test suite, then force one real failure to prove it fires, before trusting it.
+This skill is normally recalled through its description, which is weakest exactly when an agent is mid-loop. If your harness supports hooks or tool-event callbacks, wire a retry-candidate detector that injects a reminder to invoke this skill. Use structured failure status when the harness provides it. When it does not, never guess failure from error keywords; use exact repetition or a bounded activity window only to request a bounded secondary-agent review. A backend may treat a harness-generated, anchored shell exit envelope as structured packet evidence, but must not parse arbitrary command text for failure words. By default the hook must not launch a model process itself; it only asks the main agent or harness to perform the review. The shipped hooks attach a privacy-safe manifest generated from actual hook payloads; the main agent must copy the relevant raw tool-event fields into the review packet rather than replace them with a free-form summary. The reviewer detects failure-family similarity; a `known_loop` additionally requires a source-labelled prior lesson verified by the main agent. Codex users may explicitly opt into the user-context-isolated `codex_cli` backend described in `references/semantic-review.md`; it is never enabled by the public default. Runnable detector scripts live in `hooks/` (Claude Code and Codex variants) with an automated test suite in `tests/`; see `references/hook-activation.md` for registration, trust requirements, and the general pattern for other harnesses. Treat any hook config you write as an artifact under this skill's own rules: run the test suite, then trigger one real candidate to prove it fires, before trusting it.
 
 ## Examples
 

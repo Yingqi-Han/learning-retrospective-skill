@@ -16,11 +16,11 @@ Failure is not error — repeated attempts on a novel problem are legitimate exp
 
 - Capture lessons automatically after a hard-won success (two or more failed attempts, non-obvious workaround, machine-specific fact) — the primary mode.
 - Check memory for a prior lesson before re-deriving a fix, and classify the problem as known or novel.
-- Detect verbatim retry loops and force an evidence checkpoint before more tool switching.
+- Detect exact retry candidates and escalate short multi-command activity or failure windows to a bounded semantic reviewer.
 - Add explicit failure gates before broad discovery.
 - Capture only verified, reusable lessons.
 - Route lessons to user memory, project memory, or skill updates.
-- Optionally ask any available secondary reviewer or agent for a bounded audit.
+- Optionally ask any available fast secondary reviewer to distinguish a known loop from evidence-producing novel exploration.
 - Optionally activate automatically via harness hooks that detect repeated failures (see `learning-retrospective/references/hook-activation.md`; the Claude Code detector there is deployed and verified live, 2026-07-09).
 
 ## Quick Start
@@ -105,13 +105,17 @@ Runnable retry-loop detector scripts for Claude Code and Codex live in `learning
 python -S -m unittest discover -s learning-retrospective/tests -v
 ```
 
-Hooks are executable local code that runs on every future tool call — read `SECURITY_NOTES.md` before installing, review the scripts, and verify with one forced live failure after registration. Registration steps per harness are in `learning-retrospective/references/hook-activation.md`.
+Hooks are executable local code that runs on every future tool call — read `SECURITY_NOTES.md` before installing, review the scripts, and verify with one live candidate after registration. Registration steps per harness are in `learning-retrospective/references/hook-activation.md`.
+
+The detectors use two tiers. Harnesses that expose structured failure status retain deterministic repeated-failure reminders. On Codex builds that expose only output text, the detector never guesses failure from error keywords; an exact repeat or a bounded shell-activity window requests an evidence-bound semantic review instead. The hook supplies a privacy-safe manifest of events it actually observed. The protocol distinguishes enforced tool denial, filesystem read-only mode, and a prompt-only contract instead of treating them as equivalent.
+
+The public default is `review_backend: "main_agent"` and never starts a model process. Codex users may explicitly opt into `review_backend: "codex_cli"` in their local reviewer config. That backend reads a bounded parent-rollout tail, redacts common credential forms, runs one real Codex child in a temporary `CODEX_HOME`, disables shell/web/browser/MCP-style tool surfaces before the model call, enforces `--sandbox read-only`, validates a strict output schema, captures the runtime `thread_id`, and injects the result directly. The temporary home copies file-based Codex authentication for the duration of the call, but does not inherit user skills, hooks, rules, or memory; Codex built-in system context still exists. Therefore the child performs semantic triage (`same_failure_family`) rather than pretending to know stored lessons. The main agent performs one bounded lesson lookup and may promote the result to `known_loop` only after citing a still-applicable source-labelled lesson. Increase the Codex hook timeout to 60 seconds before enabling it. `install.py --with-hooks` transactionally copies the backend while preserving the user's active configuration. See `learning-retrospective/references/semantic-review.md`.
 
 ## Compatibility
 
 | Agent | Tested | Install surface | Notes |
 |---|---:|---|---|
-| Codex | yes, structure validated and subagent-tested (Windows 11, Codex desktop app 26.623.141536, 2026-07-09) | `~/.codex/skills/` | Uses `SKILL.md` frontmatter and optional `agents/openai.yaml`; keep `SKILL.md` ASCII-only for Windows validator compatibility. Hook config pipe-tested; hook field shapes are empirical, re-test after upgrades. |
+| Codex | yes, structure validated and subagent-tested (Windows 11; semantic classifier re-tested with an optional fast reviewer, 2026-07-24) | `~/.codex/skills/` | Uses `SKILL.md` frontmatter and optional `agents/openai.yaml`; keep `SKILL.md` ASCII-only for Windows validator compatibility. Hook field shapes are empirical; re-test and re-trust after upgrades or edits. |
 | Claude Code | yes, deployed and discovered (Windows 11, 2026-07-09) | `~/.claude/skills/` | Copy the folder; the skill is discovered live from `SKILL.md` frontmatter, no restart needed. `agents/openai.yaml` is ignored. Hook-based auto-activation verified live same date — see `references/hook-activation.md`. |
 | Cursor | not yet | rules or custom instructions | Paste `SKILL.md`; load references manually as needed. |
 | Cline | not yet | `.clinerules` or memory bank | Use as plain Markdown workflow guidance if skill folders are unavailable. |

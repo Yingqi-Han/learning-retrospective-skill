@@ -1,0 +1,8 @@
+{
+  "preferred_model": "",
+  "reasoning_effort": "medium",
+  "confidence_threshold": 0.8,
+  "review_backend": "main_agent",
+  "codex_cli_path": "",
+  "review_timeout_seconds": 45
+}
