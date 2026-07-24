@@ -67,7 +67,11 @@ Codex users may explicitly opt into a real isolated child:
   "confidence_threshold": 0.8,
   "review_backend": "codex_cli",
   "codex_cli_path": "",
-  "review_timeout_seconds": 45
+  "review_timeout_seconds": 45,
+  "activity_review_calls": 12,
+  "activity_review_min_span_seconds": 120,
+  "activity_review_cooldown_calls": 24,
+  "activity_review_cooldown_seconds": 900
 }
 ```
 
@@ -126,6 +130,8 @@ observed. The manifest contains:
 - a request-specific `request_id`;
 - `evidence_source=hook_observed_payloads`;
 - structured-failure or activity-window mode; and
+- a `candidate_reason` distinguishing structured failures, exact unknown
+  repetition, and sustained unknown activity; and
 - ordered event indexes, command signatures, and outcomes
   (`failed`/`succeeded`/`unknown`).
 

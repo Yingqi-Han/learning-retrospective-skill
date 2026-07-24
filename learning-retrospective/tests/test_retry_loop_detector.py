@@ -387,20 +387,57 @@ class CodexDetectorTest(unittest.TestCase):
             parsed["hookSpecificOutput"]["additionalContext"],
         )
 
-    def test_six_unknown_distinct_calls_request_semantic_review(self):
+    def test_rapid_unknown_activity_does_not_request_semantic_review(self):
         missing = fresh_session(
             load_fixture("codex-post-tool-use-missing-exit-code.json")
         )
         outputs = []
-        for index in range(6):
+        for index in range(12):
             event = dict(missing)
             event["tool_input"] = {"command": f"unknown-result command {index}"}
             code, out = run_hook(CODEX, event)
             self.assertEqual(code, 0)
             outputs.append(out)
 
-        self.assertEqual(outputs[:5], [""] * 5)
-        assert_semantic_review(self, outputs[5])
+        self.assertEqual(
+            outputs,
+            [""] * 12,
+            "a rapid successful-looking inspection burst must not spend a model call",
+        )
+
+    def test_sustained_unknown_activity_uses_long_event_cooldown(self):
+        missing = fresh_session(
+            load_fixture("codex-post-tool-use-missing-exit-code.json")
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "reviewer.json"
+            config_path.write_text(json.dumps({
+                "activity_review_calls": 12,
+                "activity_review_min_span_seconds": 0,
+                "activity_review_cooldown_calls": 24,
+                "activity_review_cooldown_seconds": 0,
+            }), encoding="utf-8")
+            env = {
+                "LEARNING_RETROSPECTIVE_REVIEW_CONFIG": str(config_path),
+            }
+            outputs = []
+            for index in range(36):
+                event = dict(missing)
+                event["tool_input"] = {
+                    "command": f"sustained unknown command {index}"
+                }
+                code, out = run_hook(CODEX, event, extra_env=env)
+                self.assertEqual(code, 0)
+                outputs.append(out)
+
+        self.assertEqual(outputs[:11], [""] * 11)
+        assert_semantic_review(self, outputs[11])
+        self.assertEqual(outputs[12:35], [""] * 23)
+        assert_semantic_review(self, outputs[35])
+        manifest = extract_manifest(outputs[11])
+        self.assertEqual(
+            manifest["candidate_reason"], "sustained_unknown_activity"
+        )
 
     def test_unsafe_session_id_still_works(self):
         fail = load_fixture("codex-post-tool-use-fail.json")

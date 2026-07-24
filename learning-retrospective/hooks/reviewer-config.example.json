@@ -4,5 +4,9 @@
   "confidence_threshold": 0.8,
   "review_backend": "main_agent",
   "codex_cli_path": "",
-  "review_timeout_seconds": 45
+  "review_timeout_seconds": 45,
+  "activity_review_calls": 12,
+  "activity_review_min_span_seconds": 120,
+  "activity_review_cooldown_calls": 24,
+  "activity_review_cooldown_seconds": 900
 }

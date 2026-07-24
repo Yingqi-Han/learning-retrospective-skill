@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.1 - 2026-07-24
+
+- Keep the two-call exact-repeat path fast, but stop treating every six unknown
+  Codex shell results as a semantic-review candidate.
+- Require broad activity-only review to span 12 calls, at least three command
+  signatures, and at least 120 seconds. Back it off for at least 24 additional
+  calls and 15 minutes after each broad review.
+- Add bounded local tuning fields for the activity window and record
+  `candidate_reason` in the privacy-safe evidence manifest and diagnostics.
+- Add regression tests proving that a rapid 12-command inspection burst makes
+  no model call while sustained activity still reviews at the configured
+  boundary.
+
 ## 0.8.0 - 2026-07-24
 
 - Bind every semantic review request to a privacy-safe

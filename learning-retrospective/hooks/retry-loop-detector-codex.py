@@ -21,11 +21,15 @@ import time
 import traceback
 
 THRESHOLD = 2
-SEMANTIC_WINDOW_SIZE = 6
+SEMANTIC_WINDOW_SIZE = 12
 SEMANTIC_FAILURE_THRESHOLD = 3
 SEMANTIC_DISTINCT_COMMANDS = 2
 SEMANTIC_COOLDOWN_CALLS = 8
-ACTIVITY_REVIEW_CALLS = 6
+ACTIVITY_REVIEW_CALLS = 12
+ACTIVITY_REVIEW_DISTINCT_COMMANDS = 3
+ACTIVITY_REVIEW_MIN_SPAN_SECONDS = 120
+ACTIVITY_REVIEW_COOLDOWN_CALLS = 24
+ACTIVITY_REVIEW_COOLDOWN_SECONDS = 15 * 60
 UNKNOWN_REPEAT_THRESHOLD = 2
 STATE_PREFIX = "codex-retry-loop-"
 STATE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
@@ -134,8 +138,25 @@ def command_signature(cwd, command):
     return hashlib.sha1(material.encode("utf-8", "replace")).hexdigest()[:12]
 
 
-def update_semantic_window(state, key, failed):
+def update_semantic_window(state, key, failed, config=None):
     """Return a bounded semantic-review candidate without storing raw commands."""
+    config = config if isinstance(config, dict) else {}
+    activity_review_calls = config.get(
+        "activity_review_calls", ACTIVITY_REVIEW_CALLS
+    )
+    activity_min_span = config.get(
+        "activity_review_min_span_seconds",
+        ACTIVITY_REVIEW_MIN_SPAN_SECONDS,
+    )
+    activity_cooldown_calls = config.get(
+        "activity_review_cooldown_calls",
+        ACTIVITY_REVIEW_COOLDOWN_CALLS,
+    )
+    activity_cooldown_seconds = config.get(
+        "activity_review_cooldown_seconds",
+        ACTIVITY_REVIEW_COOLDOWN_SECONDS,
+    )
+    now = int(time.time())
     event_index = state.get("__event_index__", 0)
     if not isinstance(event_index, int) or isinstance(event_index, bool):
         event_index = 0
@@ -167,9 +188,30 @@ def update_semantic_window(state, key, failed):
         repeat_count = 0
     repeat_count = repeat_count + 1 if last_key == key else 1
 
-    last_review = state.get("__semantic_review_at__", -SEMANTIC_COOLDOWN_CALLS)
+    last_review = state.get(
+        "__semantic_review_at__", -ACTIVITY_REVIEW_COOLDOWN_CALLS
+    )
     if not isinstance(last_review, int) or isinstance(last_review, bool):
-        last_review = -SEMANTIC_COOLDOWN_CALLS
+        last_review = -ACTIVITY_REVIEW_COOLDOWN_CALLS
+    activity_started = state.get("__activity_started_at__")
+    if (
+        failed is None
+        and (
+            not isinstance(activity_started, int)
+            or isinstance(activity_started, bool)
+            or activity_started > now
+        )
+    ):
+        activity_started = now
+    elif failed is not None:
+        activity_started = None
+    last_activity_review = state.get("__activity_review_time__", 0)
+    if (
+        not isinstance(last_activity_review, int)
+        or isinstance(last_activity_review, bool)
+        or last_activity_review > now
+    ):
+        last_activity_review = 0
     failed_items = [item for item in recent if item["failed"]]
     distinct = {item["key"] for item in failed_items}
     structured_candidate = (
@@ -179,27 +221,48 @@ def update_semantic_window(state, key, failed):
         and event_index - last_review >= SEMANTIC_COOLDOWN_CALLS
     )
     activity_distinct = {item["key"] for item in recent}
-    activity_candidate = (
+    unknown_repeat_candidate = (
         failed is None
-        and (
-            repeat_count >= UNKNOWN_REPEAT_THRESHOLD
-            or (
-                len(recent) >= ACTIVITY_REVIEW_CALLS
-                and len(activity_distinct) >= SEMANTIC_DISTINCT_COMMANDS
-            )
-        )
+        and repeat_count >= UNKNOWN_REPEAT_THRESHOLD
         and event_index - last_review >= SEMANTIC_COOLDOWN_CALLS
     )
+    broad_activity_candidate = (
+        failed is None
+        and repeat_count < UNKNOWN_REPEAT_THRESHOLD
+        and len(recent) >= activity_review_calls
+        and len(activity_distinct) >= ACTIVITY_REVIEW_DISTINCT_COMMANDS
+        and activity_started is not None
+        and now - activity_started >= activity_min_span
+        and event_index - last_review >= activity_cooldown_calls
+        and now - last_activity_review >= activity_cooldown_seconds
+    )
+    activity_candidate = unknown_repeat_candidate or broad_activity_candidate
     candidate = structured_candidate or activity_candidate
+    candidate_reason = (
+        "structured_failures"
+        if structured_candidate
+        else "unknown_exact_repeat"
+        if unknown_repeat_candidate
+        else "sustained_unknown_activity"
+        if broad_activity_candidate
+        else "none"
+    )
 
     state["__event_index__"] = event_index
     state["__recent__"] = recent
     state["__last_key__"] = key
     state["__repeat_count__"] = repeat_count
+    if activity_started is None:
+        state.pop("__activity_started_at__", None)
+    else:
+        state["__activity_started_at__"] = activity_started
     if candidate:
         state["__semantic_review_at__"] = event_index
+    if broad_activity_candidate:
+        state["__activity_review_time__"] = now
     return {
         "candidate": candidate,
+        "candidate_reason": candidate_reason,
         "event_index": event_index,
         "evidence_mode": (
             "structured_failures" if structured_candidate else "activity_window"
@@ -264,6 +327,49 @@ def load_reviewer_config():
     if not isinstance(timeout, int) or isinstance(timeout, bool):
         timeout = 45
     timeout = min(MAX_REVIEW_TIMEOUT_SECONDS, max(10, timeout))
+    activity_review_calls = config.get(
+        "activity_review_calls", ACTIVITY_REVIEW_CALLS
+    )
+    if not isinstance(activity_review_calls, int) or isinstance(
+        activity_review_calls, bool
+    ):
+        activity_review_calls = ACTIVITY_REVIEW_CALLS
+    activity_review_calls = min(
+        SEMANTIC_WINDOW_SIZE, max(8, activity_review_calls)
+    )
+    activity_review_min_span_seconds = config.get(
+        "activity_review_min_span_seconds",
+        ACTIVITY_REVIEW_MIN_SPAN_SECONDS,
+    )
+    if not isinstance(activity_review_min_span_seconds, int) or isinstance(
+        activity_review_min_span_seconds, bool
+    ):
+        activity_review_min_span_seconds = ACTIVITY_REVIEW_MIN_SPAN_SECONDS
+    activity_review_min_span_seconds = min(
+        3600, max(0, activity_review_min_span_seconds)
+    )
+    activity_review_cooldown_calls = config.get(
+        "activity_review_cooldown_calls",
+        ACTIVITY_REVIEW_COOLDOWN_CALLS,
+    )
+    if not isinstance(activity_review_cooldown_calls, int) or isinstance(
+        activity_review_cooldown_calls, bool
+    ):
+        activity_review_cooldown_calls = ACTIVITY_REVIEW_COOLDOWN_CALLS
+    activity_review_cooldown_calls = min(
+        200, max(SEMANTIC_COOLDOWN_CALLS, activity_review_cooldown_calls)
+    )
+    activity_review_cooldown_seconds = config.get(
+        "activity_review_cooldown_seconds",
+        ACTIVITY_REVIEW_COOLDOWN_SECONDS,
+    )
+    if not isinstance(activity_review_cooldown_seconds, int) or isinstance(
+        activity_review_cooldown_seconds, bool
+    ):
+        activity_review_cooldown_seconds = ACTIVITY_REVIEW_COOLDOWN_SECONDS
+    activity_review_cooldown_seconds = min(
+        24 * 60 * 60, max(0, activity_review_cooldown_seconds)
+    )
     return {
         "preferred_model": model,
         "reasoning_effort": effort,
@@ -271,6 +377,10 @@ def load_reviewer_config():
         "review_backend": backend,
         "codex_cli_path": codex_cli_path,
         "review_timeout_seconds": timeout,
+        "activity_review_calls": activity_review_calls,
+        "activity_review_min_span_seconds": activity_review_min_span_seconds,
+        "activity_review_cooldown_calls": activity_review_cooldown_calls,
+        "activity_review_cooldown_seconds": activity_review_cooldown_seconds,
     }
 
 
@@ -373,6 +483,7 @@ def build_evidence_manifest(signal, session_key):
         "schema_version": 1,
         "evidence_source": "hook_observed_payloads",
         "evidence_mode": signal["evidence_mode"],
+        "candidate_reason": signal["candidate_reason"],
         "events": signal["events"],
     }
     request_material = session_key + "\n" + json.dumps(
@@ -590,7 +701,8 @@ if failed is True:
 elif failed is False:
     state.pop(key, None)
 
-semantic_signal = update_semantic_window(state, key, failed)
+review_config = load_reviewer_config()
+semantic_signal = update_semantic_window(state, key, failed, review_config)
 
 if len(state) > 205:  # cap command counters while preserving control metadata
     preserved = {
@@ -601,6 +713,8 @@ if len(state) > 205:  # cap command counters while preserving control metadata
             "__semantic_review_at__",
             "__last_key__",
             "__repeat_count__",
+            "__activity_started_at__",
+            "__activity_review_time__",
         )
         if name in state
     }
@@ -643,6 +757,7 @@ if semantic_candidate:
     append_diagnostic(
         "semantic_review_requested",
         evidence_mode=semantic_signal["evidence_mode"],
+        candidate_reason=semantic_signal["candidate_reason"],
         failure_count=semantic_signal["failure_count"],
         distinct_commands=semantic_signal["distinct_commands"],
         repeat_count=semantic_signal["repeat_count"],

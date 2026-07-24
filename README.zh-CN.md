@@ -107,7 +107,7 @@ python -S -m unittest discover -s learning-retrospective/tests -v
 
 钩子是会在以后每次工具调用时运行的本地可执行代码——安装前请阅读 `SECURITY_NOTES.md`，审查脚本内容，注册后用一次真实候选触发做实机验证。各 harness 的注册步骤见 `learning-retrospective/references/hook-activation.md`。
 
-检测器采用两层机制：能够提供结构化失败状态的 harness 保留确定性的重复失败提醒；对于只提供输出文本的 Codex 版本，检测器不会根据错误关键词猜测成功或失败，而是在命令精确重复或达到有限 shell 活动窗口时请求一次受证据约束的语义审查。钩子会附带它从真实工具事件中生成的隐私安全清单。协议会分别标记“技术上禁用工具”“文件系统只读”和“仅靠提示词约束”，不会再把三者混为一谈。
+检测器采用两层机制：能够提供结构化失败状态的 harness 保留确定性的重复失败提醒；对于只提供输出文本的 Codex 版本，检测器不会根据错误关键词猜测成功或失败。相同命令第二次出现时仍会快速请求审查；普通活动窗口则明显降频，默认要求至少 12 次调用、3 个命令签名并持续 120 秒，之后至少再等待 24 次调用和 15 分钟才允许下一次普通活动审查。这些阈值可在本机配置。钩子会附带它从真实工具事件中生成的隐私安全清单。协议会分别标记“技术上禁用工具”“文件系统只读”和“仅靠提示词约束”，不会再把三者混为一谈。
 
 公开默认值是 `review_backend: "main_agent"`，不会自行启动模型进程。Codex 用户可以在本机配置中显式启用 `review_backend: "codex_cli"`：该后端读取父任务有限长度的 JSONL 尾部、脱敏常见凭据形式，在临时 `CODEX_HOME` 中启动一个真实 Codex 子任务，并在模型调用前关闭 shell、网页、浏览器和 MCP 类工具入口，同时启用 `--sandbox read-only` 和严格输出 schema，记录运行时 `thread_id`，再把验证后的结果直接注入主任务。临时 Home 仅在调用期间复制文件型 Codex 登录凭据，不继承用户 skills、hooks、rules 或 memory；Codex 内置系统上下文仍然存在。因此子任务只负责语义分流，例如判断是否属于同一失败家族，不会假装知道长期记忆。主代理随后执行一次有边界的经验检索，只有找到并引用仍适用、带来源的经验时，才能把结果升级为 `known_loop`。启用前需把 Codex Hook 超时提高到 60 秒。`install.py --with-hooks` 会事务式复制该后端，并保留用户现有配置。详见 `learning-retrospective/references/semantic-review.md`。
 

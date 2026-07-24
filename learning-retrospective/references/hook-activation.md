@@ -17,10 +17,12 @@ Calibrate the reminder to the skill's two modes: it must not suppress legitimate
 With structured status, the shipped detectors request semantic review when the
 current failed call makes at least three failures among the last six Bash calls,
 across at least two command hashes. Without structured status, the Codex
-detector requests review after an exact repeat or a six-call window containing
-at least two command hashes. It then waits at least eight Bash calls before
-another semantic review. Commands and outputs are not stored in rolling state;
-only event indexes, command hashes, and booleans/null result markers are
+detector requests review after an exact repeat. A broad activity-only review
+requires 12 calls containing at least three command hashes over at least 120
+seconds. It then waits at least 24 additional calls and 15 minutes before
+another broad activity review; exact repeats retain the shorter eight-call
+semantic cooldown. Commands and outputs are not stored in rolling state; only
+event indexes, command hashes, timestamps, and booleans/null result markers are
 retained. When review is requested, the hook injects a
 `HOOK_EVIDENCE_MANIFEST` generated from those actual payload observations.
 
@@ -143,7 +145,7 @@ Notes:
 
 Codex supports lifecycle hooks in `~/.codex/hooks.json` (or inline `[hooks]` tables in `config.toml`). Three differences from Claude Code, verified against the official docs and the codex repo:
 
-- There is no failure-specific event ([openai/codex#24907](https://github.com/openai/codex/issues/24907) requests one). Some older/adjacent harness payloads include a structured exit code, but Codex `0.145.0` passes `tool_response` as output text only. The detector preserves deterministic failure counting when structured status exists. Otherwise it never parses output text to guess success; exact repetition or a bounded six-call activity window only requests semantic review.
+- There is no failure-specific event ([openai/codex#24907](https://github.com/openai/codex/issues/24907) requests one). Some older/adjacent harness payloads include a structured exit code, but Codex `0.145.0` passes `tool_response` as output text only. The detector preserves deterministic failure counting when structured status exists. Otherwise it never parses output text to guess success; exact repetition requests a fast review, while the default broad activity gate requires 12 calls, three command hashes, and 120 seconds.
 - The handler `command` is a single string (no exec-form `args` array). On Windows, a quoted executable path at the start of a PowerShell command needs the `&` call operator; without it the hook exits with code 1 before Python starts. Use `commandWindows` for that override and full interpreter paths for the same PATH reasons as on Claude Code.
 - Non-managed hooks do not run until the user reviews and trusts the current definition hash. Installing the files is not enough. CLI/TUI releases may expose `/hooks`; Codex Desktop uses a Hooks settings panel, and some releases show only an enable/disable switch. Enablement and trust are separate, so the switch alone does not prove that the hook is runnable.
 
@@ -174,12 +176,14 @@ isolated backend is `../hooks/retry-reviewer-codex-cli.py`. The detector
 requires a session id, expires state older than seven days, and never stores raw
 commands or output. With structured status it backs exact failure reminders off
 at 2, 4, 8... and requests semantic review for a bounded multi-command failure
-window. Without structured status, an exact repeat or six-call activity window
-requests semantic review without claiming a failure. Verify with three gates:
+window. Without structured status, an exact repeat requests review quickly;
+broad activity uses the slower 12-call/120-second gate and 24-call/15-minute
+cooldown without claiming a failure. Verify with three gates:
 run the complete suite (`python -S -m unittest discover -s
 learning-retrospective/tests -v`), repeat one harmless command twice, then run
-six harmless distinct commands and confirm the semantic-review request or
-validated automated result appears after trusting the hook.
+12 rapid harmless distinct commands and confirm that no broad review appears.
+Use a test-only zero-span configuration to verify the sustained-activity
+boundary without waiting two minutes.
 
 For troubleshooting, Codex app-server's read-only `hooks/list` method reports
 `enabled`, `currentHash`, and `trustStatus`. A hook can therefore be
