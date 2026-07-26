@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.8.8 - 2026-07-26
+
+Post-review fixes to the 0.8.7 lifecycle change, found by adversarially
+reviewing the alignment logic against longer rollout histories.
+
+- Anchor manifest alignment to the newest rollout events. Forward-greedy
+  subsequence matching anchored a repeated pattern to its OLDEST occurrence
+  whenever the rollout (32 events) kept more history than the hook window
+  (12 attempts), so `manifest_current_event_matched` went false precisely in
+  the most loop-like sessions — an alternating X,Y,X,Y retry window aligned
+  to indexes [0..3] of an 8-event history instead of [4..7]. Alignment now
+  matches backward from the end, which is complete and maximizes the final
+  matched index: if any alignment ends at the current attempt, the chosen one
+  does. Regression-verified: both new tests fail on the forward-greedy code.
+- Sweep dead PostToolUse-era state (`codex-retry-loop-*.json` and its cleanup
+  marker) during the daily cleanup: the 0.8.7 prefix change stopped reading
+  those files but also stopped cleaning them, leaving orphans in the temp
+  directory indefinitely. The shared-prefix diagnostics `.jsonl` file survives
+  the sweep. Suite: 76 tests.
+
 ## 0.8.7 - 2026-07-26
 
 Codex lifecycle correction and evidence-alignment hardening.
@@ -31,21 +51,7 @@ Codex lifecycle correction and evidence-alignment hardening.
   (`success`, `failure`, repeated `failure`) produced ordered outcomes
   `[succeeded, failed, failed]`, `current_matched=true`, `skip_count=0`, and a
   real isolated reviewer correctly classified the user-requested repetition as
-  `novel_exploration`.
-- (post-review) Anchor manifest alignment to the newest rollout events.
-  Forward-greedy subsequence matching anchored a repeated pattern to its
-  OLDEST occurrence whenever the rollout (32 events) kept more history than
-  the hook window (12 attempts), so `manifest_current_event_matched` went
-  false precisely in the most loop-like sessions — an alternating X,Y,X,Y
-  retry window aligned to indexes [0..3] of an 8-event history instead of
-  [4..7]. Alignment now matches backward from the end, which is complete and
-  maximizes the final matched index: if any alignment ends at the current
-  attempt, the chosen one does.
-- (post-review) Sweep dead PostToolUse-era state (`codex-retry-loop-*.json`
-  and its cleanup marker) during the daily cleanup: the 0.8.7 prefix change
-  stopped reading those files but also stopped cleaning them, leaving orphans
-  in the temp directory indefinitely. The shared-prefix diagnostics `.jsonl`
-  file survives the sweep. Suite: 76 tests.
+  `novel_exploration`. Suite: 73 tests.
 
 ## 0.8.6 - 2026-07-26
 
