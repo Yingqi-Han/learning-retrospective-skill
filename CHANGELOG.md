@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.6 - 2026-07-26
+
+- Keep a single copy of SECURITY_NOTES.md: the skill folder's copy is the
+  hard requirement (a manually copied skill must stay self-contained), while
+  the repo-root duplicate existed only for browsing visibility and created a
+  hand-sync burden. The root copy is removed; README, INSTALL_FOR_AGENTS, and
+  installer messages now point at `learning-retrospective/SECURITY_NOTES.md`
+  (a path that resolves both in the repo and relative to an install target's
+  parent), and the byte-identity guard added in 0.8.5 is removed along with
+  the duplication it guarded. No behavior changes; suite: 72 tests.
+
 ## 0.8.5 - 2026-07-26
 
 Redundancy cleanup; no behavior changes.

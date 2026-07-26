@@ -32,7 +32,7 @@ python install.py --agent codex     # 或：--agent claude
 python install.py --agent project --target ./.agent-skills   # 项目级
 ```
 
-安装器会先跑测试套件，再复制嵌套的技能文件夹并验证结果。钩子是可选的，**默认不安装**；只有在读过 [`SECURITY_NOTES.md`](SECURITY_NOTES.md) 之后才使用 `--with-hooks`，且注册步骤始终需要手动完成。想让 AI agent 代为安装，把 [`INSTALL_FOR_AGENTS.md`](INSTALL_FOR_AGENTS.md) 指给它即可。
+安装器会先跑测试套件，再复制嵌套的技能文件夹并验证结果。钩子是可选的，**默认不安装**；只有在读过 [`SECURITY_NOTES.md`](learning-retrospective/SECURITY_NOTES.md) 之后才使用 `--with-hooks`，且注册步骤始终需要手动完成。想让 AI agent 代为安装，把 [`INSTALL_FOR_AGENTS.md`](INSTALL_FOR_AGENTS.md) 指给它即可。
 
 常用参数：
 
@@ -42,7 +42,7 @@ python install.py --agent project --target ./.agent-skills   # 项目级
 - `--print-hook-config` —— 打印含本机真实路径的钩子注册片段，不写任何文件。
 - `--dry-run` —— 预览安装器将要触碰的所有路径。
 
-想安装固定版本而不是最新 `main`，先切换到最新发布标签（`git tag --list` 查看，再如 `git checkout v0.8.5`）。
+想安装固定版本而不是最新 `main`，先切换到最新发布标签（`git tag --list` 查看，再如 `git checkout v0.8.6`）。
 
 Python 版本：CI 在 3.10-3.14（Linux/Windows/macOS）上实测；代码按检查保持 3.8 兼容，但 EOL 解释器不做 CI 测试。
 
@@ -105,7 +105,7 @@ cp -r ./learning-retrospective ./.agent-skills/
 python -S -m unittest discover -s learning-retrospective/tests -v
 ```
 
-钩子是会在以后每次工具调用时运行的本地可执行代码——安装前请阅读 `SECURITY_NOTES.md`，审查脚本内容，注册后用一次真实候选触发做实机验证。各 harness 的注册步骤见 `learning-retrospective/references/hook-activation.md`。
+钩子是会在以后每次工具调用时运行的本地可执行代码——安装前请阅读 `learning-retrospective/SECURITY_NOTES.md`，审查脚本内容，注册后用一次真实候选触发做实机验证。各 harness 的注册步骤见 `learning-retrospective/references/hook-activation.md`。
 
 检测器采用两层机制：能够提供结构化失败状态的 harness 保留确定性的重复失败提醒；对于只提供输出文本的 Codex 版本，检测器不会根据错误关键词猜测成功或失败。相同命令第二次出现时仍会快速请求审查；普通活动窗口则明显降频，默认要求至少 12 次调用、3 个命令签名并持续 120 秒，之后至少再等待 24 次调用和 15 分钟才允许下一次普通活动审查。这些阈值可在本机配置。钩子会附带它从真实工具事件中生成的隐私安全清单。协议会分别标记“技术上禁用工具”“文件系统只读”和“仅靠提示词约束”，不会再把三者混为一谈。
 
@@ -127,7 +127,7 @@ python -S -m unittest discover -s learning-retrospective/tests -v
 - 权限不明确时，先呈现拟写入的教训和目标位置。
 - 不存储密钥、token、cookie、凭据、隐私数据、大段原始日志或未经验证的猜测。
 - 先完成用户的任务，再花时间写复盘。
-- 安装钩子脚本前请阅读 [`SECURITY_NOTES.md`](SECURITY_NOTES.md)：钩子是本地可执行代码，教训是持久化的特权写入（存在记忆污染风险面）。
+- 安装钩子脚本前请阅读 [`SECURITY_NOTES.md`](learning-retrospective/SECURITY_NOTES.md)：钩子是本地可执行代码，教训是持久化的特权写入（存在记忆污染风险面）。
 
 ## 示例
 

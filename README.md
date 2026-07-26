@@ -32,7 +32,7 @@ python install.py --agent codex     # or: --agent claude
 python install.py --agent project --target ./.agent-skills   # project-level
 ```
 
-The installer runs the test suite, copies the nested skill folder, and verifies the result. Hooks are optional and are **not** installed by default; use `--with-hooks` only after reading [`SECURITY_NOTES.md`](SECURITY_NOTES.md), and registration always stays manual. To have an AI agent perform the install, point it at [`INSTALL_FOR_AGENTS.md`](INSTALL_FOR_AGENTS.md).
+The installer runs the test suite, copies the nested skill folder, and verifies the result. Hooks are optional and are **not** installed by default; use `--with-hooks` only after reading [`SECURITY_NOTES.md`](learning-retrospective/SECURITY_NOTES.md), and registration always stays manual. To have an AI agent perform the install, point it at [`INSTALL_FOR_AGENTS.md`](INSTALL_FOR_AGENTS.md).
 
 Useful flags:
 
@@ -42,7 +42,7 @@ Useful flags:
 - `--print-hook-config` — print the hook registration snippet with resolved local paths; writes nothing.
 - `--dry-run` — preview every path the installer would touch.
 
-To install a fixed version instead of latest `main`, check out the latest release tag first (`git tag --list`, then e.g. `git checkout v0.8.5`).
+To install a fixed version instead of latest `main`, check out the latest release tag first (`git tag --list`, then e.g. `git checkout v0.8.6`).
 
 Python: CI-tested on 3.10-3.14 (Linux/Windows/macOS); the code is kept 3.8-compatible by inspection, but EOL interpreters are not CI-tested.
 
@@ -105,7 +105,7 @@ Runnable retry-loop detector scripts for Claude Code and Codex live in `learning
 python -S -m unittest discover -s learning-retrospective/tests -v
 ```
 
-Hooks are executable local code that runs on every future tool call — read `SECURITY_NOTES.md` before installing, review the scripts, and verify with one live candidate after registration. Registration steps per harness are in `learning-retrospective/references/hook-activation.md`.
+Hooks are executable local code that runs on every future tool call — read `learning-retrospective/SECURITY_NOTES.md` before installing, review the scripts, and verify with one live candidate after registration. Registration steps per harness are in `learning-retrospective/references/hook-activation.md`.
 
 The detectors use two tiers. Harnesses that expose structured failure status retain deterministic repeated-failure reminders. On Codex builds that expose only output text, the detector never guesses failure from error keywords. An exact repeat still requests review on the second call. Broad activity-only review is deliberately slower: by default it requires 12 calls across at least three command signatures over at least 120 seconds, then waits at least 24 more calls and 15 minutes before another broad review. These bounds are locally configurable. The hook supplies a privacy-safe manifest of events it actually observed. The protocol distinguishes enforced tool denial, filesystem read-only mode, and a prompt-only contract instead of treating them as equivalent.
 
@@ -127,7 +127,7 @@ The public default is `review_backend: "main_agent"` and never starts a model pr
 - Present the proposed lesson and target surface first when permission is unclear.
 - Do not store secrets, tokens, cookies, credentials, private data, long raw logs, or unverified guesses.
 - Complete the user's task before spending time on retrospective writing.
-- Before installing hook scripts, read [`SECURITY_NOTES.md`](SECURITY_NOTES.md): hooks are executable local code, and lessons are persistent privileged writes (memory-poisoning surface).
+- Before installing hook scripts, read [`SECURITY_NOTES.md`](learning-retrospective/SECURITY_NOTES.md): hooks are executable local code, and lessons are persistent privileged writes (memory-poisoning surface).
 
 ## Examples
 

@@ -22,7 +22,7 @@ What it deliberately does NOT do:
       persistent agent configuration. Hooks are executable local code; with
       --with-hooks it only copies the scripts to the harness hooks directory
       and prints the registration instructions for you to apply manually
-      (see SECURITY_NOTES.md).
+      (see learning-retrospective/SECURITY_NOTES.md).
 
 Stdlib-only; works on Windows, macOS, and Linux. CI-tested on Python
 3.10-3.14; kept 3.8-compatible by inspection.
@@ -145,7 +145,7 @@ def print_hook_config(agent):
     if not (HOOK_DIRS[agent] / HOOK_SCRIPTS[agent]).is_file():
         print("NOTE: the hook script is not present at that path yet; "
               "run install.py with --with-hooks first, or copy it manually.")
-    print("Nothing was written. See SECURITY_NOTES.md before registering.")
+    print("Nothing was written. See learning-retrospective/SECURITY_NOTES.md before registering.")
 
 
 def apply_locale(dest, locale):
@@ -503,7 +503,7 @@ def main():
                       "existing preferences were preserved.")
             if result["backup"]:
                 print(f"Previous hook files backed up to {result['backup']}.")
-            print("Next steps (manual, after reading SECURITY_NOTES.md):")
+            print("Next steps (manual, after reading learning-retrospective/SECURITY_NOTES.md):")
             print(f"  - Registration snippet: {dest / 'references' / 'hook-activation.md'}")
             if args.agent == "codex":
                 print(
@@ -513,7 +513,7 @@ def main():
                 )
     else:
         print("Hooks not installed (default). Use --with-hooks to copy the script; "
-              "registration is always manual - read SECURITY_NOTES.md first.")
+              "registration is always manual - read learning-retrospective/SECURITY_NOTES.md first.")
 
     print("Done.")
 
