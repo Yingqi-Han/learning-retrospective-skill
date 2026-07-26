@@ -1,12 +1,19 @@
 # Learning Retrospective Skill
 
 [![tests](https://github.com/Yingqi-Han/learning-retrospective-skill/actions/workflows/test.yml/badge.svg)](https://github.com/Yingqi-Han/learning-retrospective-skill/actions/workflows/test.yml)
+[![release](https://img.shields.io/github/v/release/Yingqi-Han/learning-retrospective-skill?color=blue)](https://github.com/Yingqi-Han/learning-retrospective-skill/releases/latest)
+[![license](https://img.shields.io/github/license/Yingqi-Han/learning-retrospective-skill?color=green)](LICENSE)
+[![CI matrix](https://img.shields.io/badge/CI-3%20OS%20%C3%97%20Python%203.10--3.14-informational)](https://github.com/Yingqi-Han/learning-retrospective-skill/actions/workflows/test.yml)
 
 **English** | [简体中文](README.zh-CN.md)
 
 `learning-retrospective` is a small, agent-agnostic skill for stopping repeated trial-and-error and preserving verified lessons.
 
 It is designed to work with Codex, Claude Code, Cursor, Cline, OpenCode, or any agent harness that can load `SKILL.md`-style instructions or plain Markdown guidance.
+
+![Demo: second identical failure triggers the hook, which injects a reminder; the agent recalls a stored lesson and changes approach](docs/demo.gif)
+
+*Stylized rendering of the live hook flow — the banner text is the detector's real output: second identical failure → deterministic reminder injected into model context → stored lesson recalled → changed approach instead of a verbatim retry.*
 
 ## Philosophy
 

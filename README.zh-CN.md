@@ -1,12 +1,19 @@
 # Learning Retrospective Skill（学习复盘技能）
 
 [![tests](https://github.com/Yingqi-Han/learning-retrospective-skill/actions/workflows/test.yml/badge.svg)](https://github.com/Yingqi-Han/learning-retrospective-skill/actions/workflows/test.yml)
+[![release](https://img.shields.io/github/v/release/Yingqi-Han/learning-retrospective-skill?color=blue)](https://github.com/Yingqi-Han/learning-retrospective-skill/releases/latest)
+[![license](https://img.shields.io/github/license/Yingqi-Han/learning-retrospective-skill?color=green)](LICENSE)
+[![CI matrix](https://img.shields.io/badge/CI-3%20OS%20%C3%97%20Python%203.10--3.14-informational)](https://github.com/Yingqi-Han/learning-retrospective-skill/actions/workflows/test.yml)
 
 [English](README.md) | **简体中文**
 
 `learning-retrospective` 是一个小型、与具体 agent 无关的技能（skill），用于终止重复试错并沉淀已验证的经验教训。
 
 它适用于 Codex、Claude Code、Cursor、Cline、OpenCode，以及任何能加载 `SKILL.md` 式指令或纯 Markdown 指导的 agent 环境。
+
+![演示：第二次原样失败触发钩子注入提醒，agent 召回已存教训并改变方法](docs/demo.gif)
+
+*实际钩子流程的风格化演示——横幅文字是检测器的真实输出：第二次原样失败 → 确定性提醒注入模型上下文 → 召回已存教训 → 改变方法而不是原样重试。*
 
 ## 设计哲学
 
