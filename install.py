@@ -131,7 +131,7 @@ def print_hook_config(agent):
         target = "~/.claude/settings.json (merge under existing keys)"
     else:
         windows_command = f'& "{interpreter}" -S "{script}"'
-        snippet = {"hooks": {"PostToolUse": [{"matcher": "^Bash$", "hooks": [{
+        snippet = {"hooks": {"PreToolUse": [{"matcher": "^Bash$", "hooks": [{
             "type": "command",
             "command": f'"{interpreter}" -S "{script}"',
             "commandWindows": windows_command,

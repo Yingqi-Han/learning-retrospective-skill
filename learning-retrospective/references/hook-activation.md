@@ -2,33 +2,36 @@
 
 The core weakness of any retrospective skill is the trigger paradox: it relies on the agent noticing that it is looping, and a mid-loop agent is exactly the agent least likely to notice. Description-based recall is passive. A hook turns activation into an external, enforced signal.
 
-The pattern is harness-agnostic and has two tiers:
+The pattern is harness-agnostic, but event placement is harness-specific:
 
-1. Observe tool executions and use structured success/failure status when the harness provides it.
-2. Keep a small rolling state of command hashes and result-state booleans; expire stale state.
-3. With structured status, when the same action fails twice **verbatim**, inject a deterministic reminder. If the retry continues, remind again only at exponentially spaced counts (4, 8, 16...).
-4. Without structured status, do not parse output strings to guess failure. Exact repetition or a bounded activity window may request semantic review, but may not declare a loop.
+1. Prefer a failure-specific event when the harness provides one.
+2. If post-tool hooks omit failures, observe attempts in `PreToolUse`; never
+   pretend a success-only event is a complete execution log.
+3. Keep a small rolling state of command hashes and timestamps; expire stale
+   state and never store raw commands or output.
+4. A repeated attempt or bounded activity window may request semantic review,
+   but may not declare a loop. Recover outcomes from real parent tool events.
 5. A bounded secondary agent decides whether the candidate is a known loop or legitimate novel exploration. Report `enforced_no_tools` only when the harness technically removes tool access; a read-only filesystem alone still permits reads and commands.
 
 Calibrate the reminder to the skill's two modes: it must not suppress legitimate exploration of a novel problem. Verbatim-identical retries are the one behavior that is almost never productive, which is why they are the trigger; but the injected message should say "check memory for a prior lesson; if none, keep exploring with a changed hypothesis and capture the lesson after solving," not "stop working on this."
 
 ## Semantic Review Escalation
 
-With structured status, the shipped detectors request semantic review when the
-current failed call makes at least three failures among the last six Bash calls,
-across at least two command hashes. Without structured status, the Codex
-detector requests review after an exact repeat. A broad activity-only review
-requires 12 calls containing at least three command hashes over at least 120
-seconds. It then waits at least 24 additional calls and 15 minutes before
-another broad activity review; exact repeats retain the shorter eight-call
-semantic cooldown for injected reminders, but with the opt-in `codex_cli`
-backend an activity-window candidate spends at most one automated model call
-per `activity_review_cooldown_seconds` (default 900); later candidates inside
-that window fall back to the manual protocol with the reason
-`automated_review_cooldown`. Commands and outputs are not stored in rolling state; only
-event indexes, command hashes, timestamps, and booleans/null result markers are
-retained. When review is requested, the hook injects a
-`HOOK_EVIDENCE_MANIFEST` generated from those actual payload observations.
+Claude Code uses structured failure events. Codex records attempts before
+execution because its current `PostToolUse` path is success-only. The Codex
+detector requests review when a signature appears twice in the latest 12
+attempts, including non-consecutive repetition. A broad attempt review requires
+12 calls containing at least three command hashes over at least 120 seconds. It
+then waits at least 24 additional calls and 15 minutes before another broad
+review; exact repetitions retain the shorter eight-call candidate cooldown. With
+the opt-in `codex_cli` backend, an attempt-window candidate spends at most one
+automated model call per `activity_review_cooldown_seconds` (default 900);
+later candidates inside that window fall back to the manual protocol with the
+reason `automated_review_cooldown`. Commands and outputs are not stored in
+rolling state; only event indexes, command hashes, and timestamps are retained.
+When review is requested, the hook injects a `HOOK_EVIDENCE_MANIFEST` generated
+from actual `PreToolUse` observations. The reviewer obtains prior outcomes from
+the bounded parent rollout; the current event remains `pending`.
 
 This signal is deliberately a candidate, not a verdict. The main agent or
 harness should:
@@ -137,7 +140,9 @@ Register it in `~/.claude/settings.json` (exec form; substitute your interpreter
 Verification procedure (do this once before trusting it):
 
 1. Run the automated suite: `python -S -m unittest discover -s learning-retrospective/tests -v` (covers fail/fail/reset sequences, backoff, missing session ids, BOM input, non-Bash tools, and garbage input).
-2. Run one harmless failing command twice in a live Claude Code session and confirm the reminder appears. For Codex, repeat one harmless command twice and confirm a semantic-review candidate; current Codex builds may not expose structured exit status to hooks.
+2. Run one harmless failing command twice in a live Claude Code session and
+   confirm the reminder appears. For Codex, repeat one harmless failing command
+   twice and confirm `PreToolUse` requests review before the second execution.
 
 Notes:
 
@@ -147,11 +152,19 @@ Notes:
 - The state file is scoped per session id, so parallel sessions do not interfere.
 - State files older than seven days are removed by a best-effort daily cleanup; missing session ids fail safe without counting.
 
-## Codex Example (config validated 2026-07-09)
+## Codex Example (config validated 2026-07-26)
 
-Codex supports lifecycle hooks in `~/.codex/hooks.json` (or inline `[hooks]` tables in `config.toml`). Three differences from Claude Code, verified against the official docs and the codex repo:
+Codex supports lifecycle hooks in `~/.codex/hooks.json` (or inline `[hooks]`
+tables in `config.toml`). Three differences from Claude Code, verified against
+the [official hooks documentation](https://developers.openai.com/codex/hooks)
+and the Codex source:
 
-- There is no failure-specific event ([openai/codex#24907](https://github.com/openai/codex/issues/24907) requests one). Some older/adjacent harness payloads include a structured exit code, but Codex `0.145.0` passes `tool_response` as output text only. The detector preserves deterministic failure counting when structured status exists. Otherwise it never parses output text to guess success; exact repetition requests a fast review, while the default broad activity gate requires 12 calls, three command hashes, and 120 seconds.
+- There is no failure-specific event
+  ([openai/codex#24907](https://github.com/openai/codex/issues/24907) requests
+  one), and current Codex dispatch invokes `PostToolUse` only for successful
+  tools. The detector therefore registers on `PreToolUse`, which observes both
+  eventual successes and failures. It records attempts, not outcomes; the
+  reviewer reads prior outcomes from the parent rollout.
 - The handler `command` is a single string (no exec-form `args` array). On Windows, a quoted executable path at the start of a PowerShell command needs the `&` call operator; without it the hook exits with code 1 before Python starts. Use `commandWindows` for that override and full interpreter paths for the same PATH reasons as on Claude Code.
 - Non-managed hooks do not run until the user reviews and trusts the current definition hash. Installing the files is not enough. CLI/TUI releases may expose `/hooks`; Codex Desktop uses a Hooks settings panel, and some releases show only an enable/disable switch. Enablement and trust are separate, so the switch alone does not prove that the hook is runnable.
 
@@ -160,7 +173,7 @@ Codex supports lifecycle hooks in `~/.codex/hooks.json` (or inline `[hooks]` tab
 ```json
 {
   "hooks": {
-    "PostToolUse": [
+    "PreToolUse": [
       {
         "matcher": "^Bash$",
         "hooks": [
@@ -180,14 +193,14 @@ Codex supports lifecycle hooks in `~/.codex/hooks.json` (or inline `[hooks]` tab
 The runnable detector is `../hooks/retry-loop-detector-codex.py`; the optional
 isolated backend is `../hooks/retry-reviewer-codex-cli.py`. The detector
 requires a session id, expires state older than seven days, and never stores raw
-commands or output. With structured status it backs exact failure reminders off
-at 2, 4, 8... and requests semantic review for a bounded multi-command failure
-window. Without structured status, an exact repeat requests review quickly;
-broad activity uses the slower 12-call/120-second gate and 24-call/15-minute
-cooldown without claiming a failure. Verify with three gates:
+commands or output. A repeated attempt requests review before execution; broad
+activity uses the slower 12-call/120-second gate and 24-call/15-minute cooldown
+without claiming a failure. The review packet aligns manifest attempts to
+rollout attempts as an ordered subsequence, reports skipped rollout events, and
+requires the current pending event to match. Verify with three gates:
 run the complete suite (`python -S -m unittest discover -s
-learning-retrospective/tests -v`), repeat one harmless command twice, then run
-12 rapid harmless distinct commands and confirm that no broad review appears.
+learning-retrospective/tests -v`), repeat one harmless failing command twice,
+then run 12 rapid harmless distinct commands and confirm that no broad review appears.
 Use a test-only zero-span configuration to verify the sustained-activity
 boundary without waiting two minutes.
 
@@ -200,14 +213,20 @@ for granting trust; never copy a stale hash or auto-approve an unreviewed hook.
 
 ## Verifying the Current Hook Schema
 
-Payload shapes are empirical, not guaranteed - especially on Codex, whose generated schema leaves `tool_response` unconstrained. After a harness upgrade, or before relying on a field the docs do not promise, run the shape probe:
+After a harness upgrade, run the lifecycle shape probe:
 
-1. Temporarily register `../hooks/payload-probe.py` the same way as the detector (same interpreter, same event).
-2. Trigger one successful and one failing command.
-3. Read `<temp dir>/hook-payload-shape.jsonl`: each line records key names and value types only - never values - so nothing sensitive lands on disk.
-4. Confirm `tool_input.command` exists and note whether `tool_response.exit_code` is available. The detector supports both structured-status and activity-only modes; unregister the probe and delete its file afterward.
+1. Temporarily register `../hooks/payload-probe.py` on `PreToolUse` with the
+   same interpreter and matcher as the detector.
+2. Trigger one successful and one failing Bash command.
+3. Read `<temp dir>/hook-payload-shape.jsonl`: each line records key names and
+   value types only - never values - so nothing sensitive lands on disk.
+4. Confirm both attempts produced records with `hook_event_name=PreToolUse`,
+   `tool_use_id`, and `tool_input.command`. Unregister the probe and delete its
+   output afterward.
 
-If `exit_code` is absent, the Codex detector switches to activity-only semantic review and does not infer failure from output text.
+This live gate catches the exact lifecycle regression that unit tests cannot:
+a harness may parse a synthetic failure payload correctly while never emitting
+that event for a real failed tool.
 
 ## Other Harnesses
 

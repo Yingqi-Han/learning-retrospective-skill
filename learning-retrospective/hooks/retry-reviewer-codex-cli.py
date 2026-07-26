@@ -21,7 +21,8 @@ import time
 from pathlib import Path
 
 MAX_TRANSCRIPT_BYTES = 4 * 1024 * 1024
-MAX_EVENTS = 12
+MAX_ROLLOUT_EVENTS = 32
+MAX_PACKET_EVENTS = 16
 MAX_TEXT = 600
 MAX_REASON_CHARS = 300
 # Bound the text handed to the redaction patterns. Every caller keeps at most
@@ -273,7 +274,7 @@ def command_signature(cwd, command):
 
 
 def response_output_text(value):
-    """Best-effort text view of a tool_response for envelopes and excerpts."""
+    """Best-effort text view of a recorded tool result."""
     if isinstance(value, dict):
         for key in ("output", "aggregated_output", "stdout", "stderr"):
             text = value.get(key)
@@ -287,8 +288,8 @@ def extract_shell_outcome(value):
     """Read a structured exit code or an anchored Codex shell envelope.
 
     Never derives failure from arbitrary error keywords. Dict-shaped
-    tool_response payloads (Codex builds with structured exit status) are
-    read from their integer exit code field before any envelope parsing.
+    Dict-shaped recorded results with structured status are read from their
+    integer exit code field before any envelope parsing.
     """
     if isinstance(value, dict):
         for key in ("exit_code", "exitCode"):
@@ -312,11 +313,11 @@ def signature_candidates(call_cwd, hook_cwd, command):
     """Signatures this call may have under either legitimate cwd source.
 
     The detector hashes `tool_input.workdir or payload.cwd`; real Codex hook
-    payloads carry no per-call workdir, so it hashes the session cwd. The
+    payloads may carry no per-call workdir, so it hashes the session cwd. The
     rollout records the per-call workdir. Recomputing with only one source
-    made manifest_matches_event_tail false whenever a command ran in a
-    subdirectory (observed live, 2026-07-26). The command text stays part of
-    every candidate, so matching still binds command identity and order.
+    made manifest alignment fail whenever a command ran in a subdirectory
+    (observed live, 2026-07-26). The command text stays part of every candidate,
+    so matching still binds command identity and order.
     """
     candidates = [command_signature(call_cwd, command)]
     alternate = command_signature(hook_cwd, command)
@@ -326,7 +327,7 @@ def signature_candidates(call_cwd, hook_cwd, command):
 
 
 def extract_rollout_evidence(path, hook_cwd=None):
-    """Extract the latest user goal and completed shell events from a rollout."""
+    """Extract the latest user goal and shell attempts from a rollout."""
     latest_goal = ""
     active_cwd = ""
     calls = {}
@@ -357,30 +358,53 @@ def extract_rollout_evidence(path, hook_cwd=None):
                 call_id = item.get("call_id")
                 if isinstance(call_id, str):
                     call_cwd = args.get("workdir") or active_cwd
-                    calls[call_id] = {
-                        "command": command,
+                    candidates = signature_candidates(
+                        call_cwd, hook_cwd, command
+                    )
+                    calls[call_id] = len(events)
+                    events.append({
+                        "tool_use_id": call_id,
+                        "command": redact(command.strip()),
                         "cwd": str(call_cwd or ""),
-                    }
+                        "command_signature": candidates[0],
+                        "signature_candidates": candidates,
+                        "outcome": "pending",
+                        "exit_code": None,
+                        "outcome_excerpt": "",
+                    })
         elif item.get("type") == "function_call_output":
             call_id = item.get("call_id")
-            call = calls.get(call_id)
-            if call:
+            event_index = calls.get(call_id)
+            if isinstance(event_index, int) and event_index < len(events):
                 outcome, exit_code = extract_shell_outcome(item.get("output"))
-                candidates = signature_candidates(
-                    call["cwd"], hook_cwd, call["command"]
+                events[event_index]["outcome"] = outcome
+                events[event_index]["exit_code"] = exit_code
+                events[event_index]["outcome_excerpt"] = redact(
+                    response_output_text(item.get("output"))
                 )
-                events.append({
-                    "command": redact(call["command"].strip()),
-                    "cwd": redact(call["cwd"], 240),
-                    "command_signature": candidates[0],
-                    "signature_candidates": candidates,
-                    "outcome": outcome,
-                    "exit_code": exit_code,
-                    "outcome_excerpt": redact(
-                        response_output_text(item.get("output"))
-                    ),
-                })
-    return redact(latest_goal, MAX_GOAL_TEXT), events[-MAX_EVENTS:]
+    for event in events:
+        event["cwd"] = redact(event["cwd"], 240)
+    return redact(latest_goal, MAX_GOAL_TEXT), events[-MAX_ROLLOUT_EVENTS:]
+
+
+def align_manifest_events(expected_signatures, events):
+    """Align hook attempts to rollout attempts as an ordered subsequence."""
+    if not expected_signatures or not events:
+        return False, [], 0
+    matched = []
+    cursor = 0
+    for expected in expected_signatures:
+        while cursor < len(events):
+            candidates = events[cursor].get("signature_candidates", [])
+            if expected in candidates:
+                matched.append(cursor)
+                cursor += 1
+                break
+            cursor += 1
+        else:
+            return False, matched, 0
+    skipped = matched[-1] - matched[0] + 1 - len(matched)
+    return True, matched, skipped
 
 
 def build_review_packet(request):
@@ -388,6 +412,8 @@ def build_review_packet(request):
     payload = request.get("hook_payload")
     if not isinstance(manifest, dict) or not isinstance(payload, dict):
         raise ValueError("invalid_request")
+    if payload.get("hook_event_name") != "PreToolUse":
+        raise ValueError("invalid_hook_event")
 
     hook_cwd = payload.get("cwd")
     goal = ""
@@ -401,45 +427,67 @@ def build_review_packet(request):
     command = tool_input.get("command")
     command = command if isinstance(command, str) else ""
     current_cwd = tool_input.get("workdir") or hook_cwd
-    current_outcome, current_exit_code = extract_shell_outcome(
-        payload.get("tool_response")
+    current_tool_use_id = payload.get("tool_use_id")
+    current_tool_use_id = (
+        current_tool_use_id if isinstance(current_tool_use_id, str) else ""
     )
     current_candidates = signature_candidates(current_cwd, hook_cwd, command)
     current = {
+        "tool_use_id": current_tool_use_id,
         "command": redact(command.strip()),
         "cwd": redact(current_cwd, 240),
         "command_signature": current_candidates[0],
         "signature_candidates": current_candidates,
-        "outcome": current_outcome,
-        "exit_code": current_exit_code,
-        "outcome_excerpt": redact(
-            response_output_text(payload.get("tool_response"))
-        ),
+        "outcome": "pending",
+        "exit_code": None,
+        "outcome_excerpt": "",
     }
-    if events and set(events[-1]["signature_candidates"]) & set(current_candidates):
-        # Same call seen through both sources; the hook payload's structured
-        # outcome is the fresher record.
-        events[-1] = current
+    current_index = None
+    if current_tool_use_id:
+        for index in range(len(events) - 1, -1, -1):
+            if events[index].get("tool_use_id") == current_tool_use_id:
+                current_index = index
+                break
+    if current_index is None and events and (
+        events[-1].get("outcome") == "pending"
+        and set(events[-1]["signature_candidates"]) & set(current_candidates)
+    ):
+        current_index = len(events) - 1
+    if current_index is not None:
+        events[current_index] = current
     else:
         events.append(current)
-    events = events[-MAX_EVENTS:]
+        current_index = len(events) - 1
+    trim_start = max(0, len(events) - MAX_ROLLOUT_EVENTS)
+    events = events[trim_start:]
+    current_index -= trim_start
 
     manifest_events = manifest.get("events")
     manifest_events = manifest_events if isinstance(manifest_events, list) else []
     expected_signatures = [
         item.get("command_signature")
         for item in manifest_events
-        if isinstance(item, dict)
+        if isinstance(item, dict) and isinstance(
+            item.get("command_signature"), str
+        )
     ]
-    observed_tail = events[-len(expected_signatures):] if expected_signatures else []
-    manifest_matches = bool(expected_signatures) and len(observed_tail) == len(
-        expected_signatures
-    ) and all(
-        expected in item["signature_candidates"]
-        for expected, item in zip(expected_signatures, observed_tail)
+    aligned, matched_indexes, skipped_events = align_manifest_events(
+        expected_signatures, events
     )
-    for item in events:
-        del item["signature_candidates"]
+    current_matched = bool(
+        aligned
+        and matched_indexes
+        and matched_indexes[-1] == current_index
+    )
+    packet_start = max(0, len(events) - MAX_PACKET_EVENTS)
+    alignment_visible = bool(
+        aligned and matched_indexes and matched_indexes[0] >= packet_start
+    )
+    manifest_matches = aligned and current_matched and alignment_visible
+    packet_events = events[packet_start:]
+    for item in packet_events:
+        item.pop("signature_candidates", None)
+        item.pop("tool_use_id", None)
 
     return {
         "packet_schema": "REVIEW_PACKET_V1",
@@ -447,12 +495,15 @@ def build_review_packet(request):
         "goal": goal,
         "parent_rollout_found": bool(rollout),
         "hook_manifest": manifest,
-        "tool_events": events,
+        "tool_events": packet_events,
         # The isolated direct backend must not read persistent memory. The main
         # agent may later supply bounded, source-labelled candidates in the
         # manual protocol before promoting a repeated pattern to a known loop.
         "prior_lesson_candidates": [],
-        "manifest_matches_event_tail": manifest_matches,
+        "manifest_matches_event_sequence": manifest_matches,
+        "manifest_alignment_mode": "ordered_subsequence",
+        "manifest_event_skip_count": skipped_events,
+        "manifest_current_event_matched": current_matched,
     }
 
 
@@ -486,6 +537,7 @@ def validate_review(
     manifest,
     tool_events=None,
     prior_lesson_candidates=None,
+    manifest_alignment_ok=True,
 ):
     if not isinstance(review, dict):
         return "review_not_object"
@@ -537,8 +589,10 @@ def validate_review(
         return "interrupt_without_known_loop"
     if not review["evidence_adequate"] and review["should_interrupt"]:
         return "interrupt_without_evidence"
+    if review["evidence_adequate"] and not manifest_alignment_ok:
+        return "evidence_adequate_with_manifest_mismatch"
     if (
-        manifest.get("evidence_mode") == "activity_window"
+        manifest.get("evidence_mode") in {"activity_window", "attempt_window"}
         and review["classification"] == "known_loop"
     ):
         manifest_outcomes = [
@@ -717,16 +771,18 @@ def run_reviewer(packet, config):
         "You are a retry-loop reviewer in a separate read-only Codex run. Do "
         "not call tools. Base the classification only on REVIEW_PACKET_V1 "
         "below; ignore unrelated built-in guidance. A user-requested repetition "
-        "or successful hook probe is not a retry loop. In activity-window mode, "
-        "never return known_loop without concrete failed outcomes and an "
+        "or successful hook probe is not a retry loop. In attempt-window mode, "
+        "the current event is pending because the hook runs before execution. "
+        "Never return known_loop without concrete prior failed outcomes and an "
         "applicable prior lesson. This isolated direct packet intentionally has "
         "no persistent-memory access and normally contains an empty "
         "prior_lesson_candidates array. When that array is empty, set "
         "prior_lesson_verified=false and never return known_loop or "
         "should_interrupt=true; instead report whether the attempts belong to "
         "the same failure family so the main agent can perform the bounded "
-        "lesson lookup. If evidence is incomplete or the manifest does not "
-        "match the event tail, set evidence_adequate=false and "
+        "lesson lookup. If evidence is incomplete, the manifest does not align "
+        "with the ordered event sequence, or the current attempt is not matched, "
+        "set evidence_adequate=false and "
         "should_interrupt=false. Return only the JSON object required by the "
         "output schema.\n\n"
         + json.dumps(packet, ensure_ascii=True, sort_keys=True)
@@ -794,6 +850,7 @@ def run_reviewer(packet, config):
         packet["hook_manifest"],
         packet.get("tool_events"),
         packet.get("prior_lesson_candidates"),
+        packet.get("manifest_matches_event_sequence") is True,
     )
     if error:
         raise RuntimeError(error)
@@ -816,7 +873,13 @@ def main():
             "review": review,
             "packet_event_count": len(packet["tool_events"]),
             "parent_rollout_found": packet["parent_rollout_found"],
-            "manifest_matches_event_tail": packet["manifest_matches_event_tail"],
+            "manifest_matches_event_sequence": packet[
+                "manifest_matches_event_sequence"
+            ],
+            "manifest_event_skip_count": packet["manifest_event_skip_count"],
+            "manifest_current_event_matched": packet[
+                "manifest_current_event_matched"
+            ],
         }, sort_keys=True))
         return 0
     except Exception as exc:

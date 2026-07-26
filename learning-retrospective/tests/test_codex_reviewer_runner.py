@@ -95,8 +95,8 @@ class CodexReviewerRunnerTest(unittest.TestCase):
 
     def test_validate_review_accepts_consistent_non_interrupt(self):
         manifest = {
-            "evidence_mode": "activity_window",
-            "events": [{"outcome": "unknown"}],
+            "evidence_mode": "attempt_window",
+            "events": [{"outcome": "attempted"}],
         }
         review = {
             "schema_version": 1,
@@ -115,10 +115,37 @@ class CodexReviewerRunnerTest(unittest.TestCase):
             "",
         )
 
+    def test_validate_review_rejects_adequate_claim_on_alignment_mismatch(self):
+        manifest = {
+            "evidence_mode": "attempt_window",
+            "events": [{"outcome": "attempted"}],
+        }
+        review = {
+            "schema_version": 1,
+            "request_id": "request-mismatch",
+            "classification": "uncertain",
+            "confidence": 0.7,
+            "same_failure_family": False,
+            "prior_lesson_verified": False,
+            "evidence_adequate": True,
+            "should_interrupt": False,
+            "reason": "Packet alignment failed",
+            "recommended_action": "continue",
+        }
+        self.assertEqual(
+            RUNNER.validate_review(
+                review,
+                "request-mismatch",
+                manifest,
+                manifest_alignment_ok=False,
+            ),
+            "evidence_adequate_with_manifest_mismatch",
+        )
+
     def test_validate_review_rejects_known_loop_without_failed_tool_events(self):
         manifest = {
-            "evidence_mode": "activity_window",
-            "events": [{"outcome": "unknown"}],
+            "evidence_mode": "attempt_window",
+            "events": [{"outcome": "attempted"}],
         }
         review = {
             "schema_version": 1,
@@ -145,8 +172,8 @@ class CodexReviewerRunnerTest(unittest.TestCase):
 
     def test_validate_review_rejects_known_loop_without_lesson_candidate(self):
         manifest = {
-            "evidence_mode": "activity_window",
-            "events": [{"outcome": "unknown"}, {"outcome": "unknown"}],
+            "evidence_mode": "attempt_window",
+            "events": [{"outcome": "attempted"}, {"outcome": "attempted"}],
         }
         review = {
             "schema_version": 1,
@@ -172,8 +199,8 @@ class CodexReviewerRunnerTest(unittest.TestCase):
 
     def test_validate_review_accepts_known_loop_with_verified_lesson(self):
         manifest = {
-            "evidence_mode": "activity_window",
-            "events": [{"outcome": "unknown"}, {"outcome": "unknown"}],
+            "evidence_mode": "attempt_window",
+            "events": [{"outcome": "attempted"}, {"outcome": "attempted"}],
         }
         review = {
             "schema_version": 1,
@@ -261,15 +288,17 @@ class CodexReviewerRunnerTest(unittest.TestCase):
             "hook_payload": {
                 "session_id": "not-a-real-session",
                 "cwd": "C:\\ignored",
+                "hook_event_name": "PreToolUse",
+                "tool_use_id": "call-current",
                 "tool_input": {"command": command, "workdir": cwd},
-                "tool_response": "Exit code: 1\nOutput:\nfailed",
             },
         }
         packet = RUNNER.build_review_packet(request)
-        self.assertTrue(packet["manifest_matches_event_tail"])
+        self.assertTrue(packet["manifest_matches_event_sequence"])
+        self.assertTrue(packet["manifest_current_event_matched"])
         self.assertEqual(packet["prior_lesson_candidates"], [])
-        self.assertEqual(packet["tool_events"][-1]["outcome"], "failed")
-        self.assertEqual(packet["tool_events"][-1]["exit_code"], 1)
+        self.assertEqual(packet["tool_events"][-1]["outcome"], "pending")
+        self.assertIsNone(packet["tool_events"][-1]["exit_code"])
 
     def _real_shape_request(self, command, manifest_command, repeats=3):
         """Request shaped like a real Codex build: the hook payload has no
@@ -300,14 +329,15 @@ class CodexReviewerRunnerTest(unittest.TestCase):
                     ),
                 },
             })
-            records.append({
-                "type": "response_item",
-                "payload": {
-                    "type": "function_call_output",
-                    "call_id": f"call-{index}",
-                    "output": "Exit code: 1\nOutput:\nboom",
-                },
-            })
+            if index < repeats - 1:
+                records.append({
+                    "type": "response_item",
+                    "payload": {
+                        "type": "function_call_output",
+                        "call_id": f"call-{index}",
+                        "output": "Exit code: 1\nOutput:\nboom",
+                    },
+                })
         return session_cwd, manifest, records
 
     def _packet_from_rollout(self, session_cwd, manifest, records, command):
@@ -331,8 +361,9 @@ class CodexReviewerRunnerTest(unittest.TestCase):
                     "hook_payload": {
                         "session_id": session_id,
                         "cwd": session_cwd,
+                        "hook_event_name": "PreToolUse",
+                        "tool_use_id": f"call-{len(manifest['events']) - 1}",
                         "tool_input": {"command": command},
-                        "tool_response": {"exit_code": 1, "output": "boom"},
                     },
                 })
 
@@ -348,10 +379,16 @@ class CodexReviewerRunnerTest(unittest.TestCase):
             session_cwd, manifest, records, command
         )
         self.assertTrue(packet["parent_rollout_found"])
-        self.assertTrue(packet["manifest_matches_event_tail"])
+        self.assertTrue(packet["manifest_matches_event_sequence"])
+        self.assertTrue(packet["manifest_current_event_matched"])
+        self.assertEqual(packet["manifest_event_skip_count"], 0)
         self.assertEqual(
             len(packet["tool_events"]), 3,
             "current event must dedupe into the last rollout event",
+        )
+        self.assertEqual(
+            [event["outcome"] for event in packet["tool_events"]],
+            ["failed", "failed", "pending"],
         )
         for event in packet["tool_events"]:
             self.assertNotIn("signature_candidates", event)
@@ -364,7 +401,36 @@ class CodexReviewerRunnerTest(unittest.TestCase):
         packet = self._packet_from_rollout(
             session_cwd, manifest, records, command
         )
-        self.assertFalse(packet["manifest_matches_event_tail"])
+        self.assertFalse(packet["manifest_matches_event_sequence"])
+
+    def test_manifest_alignment_tolerates_one_unobserved_rollout_event(self):
+        command = "python run.py"
+        session_cwd, manifest, records = self._real_shape_request(
+            command, command
+        )
+        extra_call = {
+            "type": "response_item",
+            "payload": {
+                "type": "function_call",
+                "call_id": "missed-call",
+                "arguments": json.dumps({"command": "python unrelated.py"}),
+            },
+        }
+        extra_output = {
+            "type": "response_item",
+            "payload": {
+                "type": "function_call_output",
+                "call_id": "missed-call",
+                "output": "Exit code: 1\nOutput:\nmissed",
+            },
+        }
+        records[2:2] = [extra_call, extra_output]
+        packet = self._packet_from_rollout(
+            session_cwd, manifest, records, command
+        )
+        self.assertTrue(packet["manifest_matches_event_sequence"])
+        self.assertEqual(packet["manifest_alignment_mode"], "ordered_subsequence")
+        self.assertEqual(packet["manifest_event_skip_count"], 1)
 
     def test_prepare_isolated_home_copies_only_auth(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -413,9 +479,10 @@ class CodexReviewerRunnerTest(unittest.TestCase):
     def test_run_reviewer_uses_temporary_codex_home(self):
         packet = {
             "request_id": "request-3",
+            "manifest_matches_event_sequence": True,
             "hook_manifest": {
-                "evidence_mode": "activity_window",
-                "events": [{"outcome": "unknown"}],
+                "evidence_mode": "attempt_window",
+                "events": [{"outcome": "attempted"}],
             },
         }
         review = {
@@ -507,27 +574,31 @@ class CodexReviewerRunnerTest(unittest.TestCase):
             ("failed", 2),
         )
 
-    def test_build_packet_with_dict_tool_response_keeps_structured_outcome(self):
+    def test_current_pre_tool_event_stays_pending(self):
         command = "pip install nonexistent-package-xyz"
         request = {
-            "manifest": {"request_id": "request-dict", "events": []},
+            "manifest": {
+                "request_id": "request-pre",
+                "events": [{
+                    "command_signature": RUNNER.command_signature(
+                        "C:\\work", command
+                    ),
+                }],
+            },
             "hook_payload": {
                 "session_id": "not-a-real-session",
                 "cwd": "C:\\work",
+                "hook_event_name": "PreToolUse",
+                "tool_use_id": "call-pre",
                 "tool_input": {"command": command},
-                "tool_response": {
-                    "output": "ERROR: No matching distribution",
-                    "exit_code": 1,
-                },
             },
         }
         packet = RUNNER.build_review_packet(request)
         current = packet["tool_events"][-1]
-        self.assertEqual(current["outcome"], "failed")
-        self.assertEqual(current["exit_code"], 1)
-        self.assertIn("No matching distribution", current["outcome_excerpt"])
-        self.assertNotIn("exit_code", current["outcome_excerpt"],
-                         "excerpt must not be a Python-repr of the dict")
+        self.assertEqual(current["outcome"], "pending")
+        self.assertIsNone(current["exit_code"])
+        self.assertEqual(current["outcome_excerpt"], "")
+        self.assertTrue(packet["manifest_matches_event_sequence"])
 
     def test_redact_masks_segment_named_env_credentials(self):
         near_misses = [
@@ -553,9 +624,10 @@ class CodexReviewerRunnerTest(unittest.TestCase):
     def test_run_reviewer_bounds_and_flattens_reason(self):
         packet = {
             "request_id": "request-reason",
+            "manifest_matches_event_sequence": True,
             "hook_manifest": {
-                "evidence_mode": "activity_window",
-                "events": [{"outcome": "unknown"}],
+                "evidence_mode": "attempt_window",
+                "events": [{"outcome": "attempted"}],
             },
         }
         review = {

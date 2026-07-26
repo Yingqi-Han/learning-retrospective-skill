@@ -1,9 +1,10 @@
 """Hook payload SHAPE probe - verify what your harness actually sends.
 
-The Codex hook schema leaves tool_response unconstrained, and any harness can
-change its payload between versions. Register this probe TEMPORARILY in place
-of (or alongside) the retry-loop detector, trigger one successful and one
-failing command, then read the shape file it writes:
+Any harness can change its payload or lifecycle coverage between versions.
+Register this probe TEMPORARILY on the same event as the retry-loop detector,
+trigger one successful and one failing command, then read the shape file it
+writes. For the Codex detector, both attempts must produce `PreToolUse`
+records:
 
     <temp dir>/hook-payload-shape.jsonl
 

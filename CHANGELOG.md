@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.8.7 - 2026-07-26
+
+Codex lifecycle correction and evidence-alignment hardening.
+
+- Move the Codex detector from `PostToolUse` to `PreToolUse`. Current Codex
+  dispatch invokes `PostToolUse` only for successful tools, so the old
+  registration could run frequently while never observing the failed commands
+  it was meant to detect. `PreToolUse` now records every Bash attempt before
+  execution, including eventual failures.
+- Treat the Codex hook signal as an attempt candidate, never as proof of
+  failure. A signature repeated within the latest 12 attempts requests review;
+  the broader gate remains 12 calls, three signatures, and 120 seconds. Raw
+  commands and output never enter rolling state, and the new state prefix keeps
+  old post-tool state from contaminating the attempt window.
+- Rebuild the direct reviewer packet from parent-rollout function calls,
+  including the current pending attempt. Manifest matching now uses a bounded
+  ordered-subsequence alignment, tolerates explicitly counted skipped rollout
+  events, and requires the current event to match. This fixes the live
+  `manifest_matches_event_tail=false` drift caused whenever a failed tool was
+  present in the parent rollout but absent from the old success-only hook state.
+- Update the installer to print `PreToolUse` registration, ignore stale
+  `PostToolUse` payloads in the Codex detector, and add regression tests for
+  registration, pending-current-event semantics, non-consecutive exact
+  repetition, lifecycle migration, and skipped-event alignment.
+- Correct `SECURITY_NOTES.md`: the nested copy is canonical, and release
+  verification now uses `<tag>` instead of the stale `v0.6.x` example.
+- Expand the live release gate: both an eventual success and an eventual
+  failure must produce `PreToolUse` probe records. A live three-call probe
+  (`success`, `failure`, repeated `failure`) produced ordered outcomes
+  `[succeeded, failed, failed]`, `current_matched=true`, `skip_count=0`, and a
+  real isolated reviewer correctly classified the user-requested repetition as
+  `novel_exploration`. Suite: 73 tests.
+
 ## 0.8.6 - 2026-07-26
 
 - Keep a single copy of SECURITY_NOTES.md: the skill folder's copy is the

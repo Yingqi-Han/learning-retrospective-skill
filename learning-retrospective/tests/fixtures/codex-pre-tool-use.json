@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "PreToolUse",
+  "session_id": "FIXTURE_SESSION",
+  "turn_id": "FIXTURE_TURN",
+  "tool_use_id": "FIXTURE_CALL",
+  "tool_name": "Bash",
+  "tool_input": { "command": "pip install nonexistent-package-xyz" }
+}

@@ -2,14 +2,18 @@
 
 This repository contains prompt and workflow guidance, plus runnable hook scripts in `learning-retrospective/hooks/` with registration guidance in `learning-retrospective/references/hook-activation.md`. The hook scripts are executable local code and deserve the same scrutiny as any code you install.
 
-A copy of this file ships inside the nested skill folder (`learning-retrospective/SECURITY_NOTES.md`) so it survives a folder-only install; the repository root copy is canonical.
+This file is the canonical security note and ships inside the nested skill
+folder so it survives a folder-only install.
 
 ## Hooks
 
 - Never let an agent auto-install hooks without explicit user approval. Installing a hook changes what runs on every future tool call, in every future session.
 - Review a hook script before registering it, and re-review after any edit. Codex tracks enablement and trust separately: CLI/TUI builds may expose `/hooks`, while Desktop builds use a Hooks settings panel whose controls vary by release. An enabled switch alone does not prove that the current definition hash is trusted. On Claude Code, the settings file edit is itself the approval surface, so read the diff.
 - Pin hooks to full interpreter and script paths. A hook that resolves its interpreter through PATH can be hijacked by anything that edits PATH.
-- Verify a hook with synthetic input and one live candidate before trusting it, and again after harness upgrades. On Codex builds without structured exit status, use an exact repeated harmless command or the bounded activity window instead of pretending the hook can identify failures.
+- Verify a hook with synthetic input and one live candidate before trusting it,
+  and again after harness upgrades. On Codex, confirm `PreToolUse` observes both
+  an eventual success and an eventual failure; the detector records attempts
+  and lets the reviewer recover prior outcomes from the parent rollout.
 - Keep model invocation outside the hook process by default. The portable
   `main_agent` mode only requests a bounded semantic review; silently launching
   Codex, Claude Code, or an API client can create recursive hooks, hidden
@@ -88,7 +92,12 @@ If the user did not explicitly ask to save or update the lesson, present the pro
 
 ## Release Verification
 
-Git tags in this repository are annotated but not GPG-signed. If your threat model requires provenance beyond GitHub account trust, pin the commit SHA instead of the tag name (`git checkout <sha>` after inspecting `git log --format="%H %s" v0.6.x`), review the diff before use, and re-run the test suite locally. The skill and hooks are small, stdlib-only Python and Markdown - a full review takes minutes.
+Git tags in this repository are annotated but not GPG-signed. If your threat
+model requires provenance beyond GitHub account trust, pin the commit SHA
+instead of the tag name (`git checkout <sha>` after inspecting
+`git log --format="%H %s" <tag>`), review the diff before use, and re-run the
+test suite locally. The skill and hooks are small, stdlib-only Python and
+Markdown - a full review takes minutes.
 
 ## Reporting Issues
 

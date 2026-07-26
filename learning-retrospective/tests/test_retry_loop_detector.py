@@ -36,12 +36,16 @@ def load_fixture(name):
 def run_hook(script, payload, bom=False, extra_env=None):
     session_id = payload.get("session_id")
     if session_id:
-        prefix = "codex" if "codex" in Path(script).name else "claude"
+        prefix = (
+            "codex-retry-attempt"
+            if "codex" in Path(script).name
+            else "claude-retry-loop"
+        )
         session_key = hashlib.sha1(
             str(session_id).encode("utf-8", "replace")
         ).hexdigest()[:12]
         CREATED_STATE_PATHS.add(
-            Path(tempfile.gettempdir()) / f"{prefix}-retry-loop-{session_key}.json"
+            Path(tempfile.gettempdir()) / f"{prefix}-{session_key}.json"
         )
     raw = json.dumps(payload).encode("utf-8")
     if bom:
@@ -324,78 +328,50 @@ class CodexDetectorTest(unittest.TestCase):
             self.assertEqual(diagnostic["raw_bytes"], len(b"not-json"))
             self.assertNotIn("raw", diagnostic)
 
-    def test_second_identical_failure_emits_reminder_then_success_resets(self):
-        fail = fresh_session(load_fixture("codex-post-tool-use-fail.json"))
-        ok = dict(load_fixture("codex-post-tool-use-success.json"))
-        ok["session_id"] = fail["session_id"]
+    def test_second_identical_attempt_requests_pre_tool_review(self):
+        attempt = fresh_session(load_fixture("codex-pre-tool-use.json"))
 
-        code, out = run_hook(CODEX, fail)
+        code, out = run_hook(CODEX, attempt)
         self.assertEqual(code, 0)
-        self.assertEqual(out, "", "first failure must not emit a reminder")
+        self.assertEqual(out, "", "first attempt must not emit a review")
 
-        code, out = run_hook(CODEX, fail)
-        self.assertEqual(code, 0)
-        assert_reminder(self, out)
-
-        code, out = run_hook(CODEX, ok)
-        self.assertEqual(code, 0)
-        self.assertEqual(out, "", "success must reset silently")
-
-    def test_missing_exit_code_uses_semantic_review_fallback(self):
-        missing = fresh_session(
-            load_fixture("codex-post-tool-use-missing-exit-code.json")
-        )
-
-        code, out = run_hook(CODEX, missing)
-        self.assertEqual(code, 0)
-        self.assertEqual(out, "")
-
-        code, out = run_hook(CODEX, missing)
+        code, out = run_hook(CODEX, attempt)
         self.assertEqual(code, 0)
         assert_semantic_review(self, out)
-        ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("did not expose a structured shell exit status", ctx)
+        parsed = json.loads(out)
+        self.assertEqual(
+            parsed["hookSpecificOutput"]["hookEventName"], "PreToolUse"
+        )
+        ctx = parsed["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("current attempt has not executed yet", ctx)
         self.assertIn("fork_context:false", ctx)
         self.assertIn("user-requested repetition", ctx)
         self.assertIn("literal true/false", ctx)
         self.assertIn("prior_lesson_candidates", ctx)
         self.assertIn("prior_lesson_verified", ctx)
         manifest = extract_manifest(out)
-        self.assertEqual(manifest["evidence_mode"], "activity_window")
+        self.assertEqual(manifest["evidence_mode"], "attempt_window")
+        self.assertEqual(manifest["candidate_reason"], "exact_attempt_repeat")
+        self.assertEqual(manifest["evidence_source"], "pre_tool_hook_payloads")
         self.assertEqual(
             [event["outcome"] for event in manifest["events"]],
-            ["unknown", "unknown"],
+            ["attempted", "attempted"],
         )
-        self.assertIn("spawn_agent", ctx)
-        self.assertIn("known_loop as internally invalid", ctx)
         self.assertNotIn("has now failed", ctx)
 
-    def test_boolean_exit_code_is_not_treated_as_structured_status(self):
-        event = fresh_session(load_fixture("codex-post-tool-use-fail.json"))
-        event["tool_response"] = {"exit_code": True}
+    def test_post_tool_payload_is_ignored_after_migration(self):
+        post = fresh_session(load_fixture("codex-post-tool-use-fail.json"))
+        for _ in range(2):
+            code, out = run_hook(CODEX, post)
+            self.assertEqual(code, 0)
+            self.assertEqual(out, "")
 
-        code, out = run_hook(CODEX, event)
-        self.assertEqual(code, 0)
-        self.assertEqual(out, "")
-
-        code, out = run_hook(CODEX, event)
-        self.assertEqual(code, 0)
-        assert_semantic_review(self, out)
-        parsed = json.loads(out)
-        self.assertNotIn("same command failed", parsed["systemMessage"])
-        self.assertIn(
-            "did not expose a structured shell exit status",
-            parsed["hookSpecificOutput"]["additionalContext"],
-        )
-
-    def test_rapid_unknown_activity_does_not_request_semantic_review(self):
-        missing = fresh_session(
-            load_fixture("codex-post-tool-use-missing-exit-code.json")
-        )
+    def test_rapid_distinct_attempts_do_not_request_semantic_review(self):
+        attempt = fresh_session(load_fixture("codex-pre-tool-use.json"))
         outputs = []
         for index in range(12):
-            event = dict(missing)
-            event["tool_input"] = {"command": f"unknown-result command {index}"}
+            event = dict(attempt)
+            event["tool_input"] = {"command": f"rapid attempt command {index}"}
             code, out = run_hook(CODEX, event)
             self.assertEqual(code, 0)
             outputs.append(out)
@@ -406,10 +382,8 @@ class CodexDetectorTest(unittest.TestCase):
             "a rapid successful-looking inspection burst must not spend a model call",
         )
 
-    def test_sustained_unknown_activity_uses_long_event_cooldown(self):
-        missing = fresh_session(
-            load_fixture("codex-post-tool-use-missing-exit-code.json")
-        )
+    def test_sustained_attempt_activity_uses_long_event_cooldown(self):
+        attempt = fresh_session(load_fixture("codex-pre-tool-use.json"))
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "reviewer.json"
             config_path.write_text(json.dumps({
@@ -423,9 +397,9 @@ class CodexDetectorTest(unittest.TestCase):
             }
             outputs = []
             for index in range(36):
-                event = dict(missing)
+                event = dict(attempt)
                 event["tool_input"] = {
-                    "command": f"sustained unknown command {index}"
+                    "command": f"sustained attempt command {index}"
                 }
                 code, out = run_hook(CODEX, event, extra_env=env)
                 self.assertEqual(code, 0)
@@ -437,47 +411,44 @@ class CodexDetectorTest(unittest.TestCase):
         assert_semantic_review(self, outputs[35])
         manifest = extract_manifest(outputs[11])
         self.assertEqual(
-            manifest["candidate_reason"], "sustained_unknown_activity"
+            manifest["candidate_reason"], "sustained_attempt_activity"
         )
 
     def test_unsafe_session_id_still_works(self):
-        fail = load_fixture("codex-post-tool-use-fail.json")
-        fail = dict(fail)
-        fail["session_id"] = "../weird:session/../" + uuid.uuid4().hex[:8]
-        code, out = run_hook(CODEX, fail)
+        attempt = dict(load_fixture("codex-pre-tool-use.json"))
+        attempt["session_id"] = "../weird:session/../" + uuid.uuid4().hex[:8]
+        code, out = run_hook(CODEX, attempt)
         self.assertEqual(code, 0)
         self.assertEqual(out, "")
-        code, out = run_hook(CODEX, fail)
+        code, out = run_hook(CODEX, attempt)
         self.assertEqual(code, 0)
-        assert_reminder(self, out)
+        assert_semantic_review(self, out)
 
-    def test_reminder_uses_exponential_backoff(self):
-        fail = fresh_session(load_fixture("codex-post-tool-use-fail.json"))
-        run_hook(CODEX, fail)
-        _, second = run_hook(CODEX, fail)
-        _, third = run_hook(CODEX, fail)
-        _, fourth = run_hook(CODEX, fail)
-        assert_reminder(self, second, 2)
-        self.assertEqual(third, "", "third failure must not repeat the reminder")
-        assert_reminder(self, fourth, 4)
+    def test_repeat_candidate_uses_event_cooldown(self):
+        attempt = fresh_session(load_fixture("codex-pre-tool-use.json"))
+        outputs = [run_hook(CODEX, attempt)[1] for _ in range(10)]
+        self.assertEqual(outputs[0], "")
+        assert_semantic_review(self, outputs[1])
+        self.assertEqual(outputs[2:9], [""] * 7)
+        assert_semantic_review(self, outputs[9])
 
     def test_missing_session_id_fails_safe(self):
-        fail = load_fixture("codex-post-tool-use-fail.json")
-        fail.pop("session_id", None)
+        attempt = load_fixture("codex-pre-tool-use.json")
+        attempt.pop("session_id", None)
         for _ in range(2):
-            code, out = run_hook(CODEX, fail)
+            code, out = run_hook(CODEX, attempt)
             self.assertEqual(code, 0)
             self.assertEqual(out, "")
 
     def test_non_string_command_fails_safe(self):
-        fail = fresh_session(load_fixture("codex-post-tool-use-fail.json"))
-        fail["tool_input"] = {"command": ["not", "a", "string"]}
-        code, out = run_hook(CODEX, fail)
+        attempt = fresh_session(load_fixture("codex-pre-tool-use.json"))
+        attempt["tool_input"] = {"command": ["not", "a", "string"]}
+        code, out = run_hook(CODEX, attempt)
         self.assertEqual(code, 0)
         self.assertEqual(out, "")
 
-    def test_three_distinct_failures_request_configured_reviewer(self):
-        fail = fresh_session(load_fixture("codex-post-tool-use-fail.json"))
+    def test_repeated_attempt_requests_configured_reviewer(self):
+        attempt = fresh_session(load_fixture("codex-pre-tool-use.json"))
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "reviewer.json"
             config_path.write_text(json.dumps({
@@ -489,59 +460,36 @@ class CodexDetectorTest(unittest.TestCase):
                 "LEARNING_RETROSPECTIVE_REVIEW_CONFIG": str(config_path),
             }
             outputs = []
-            for index in range(3):
-                event = dict(fail)
-                event["tool_input"] = {"command": f"distinct failing command {index}"}
-                code, out = run_hook(CODEX, event, extra_env=env)
+            for _ in range(2):
+                code, out = run_hook(CODEX, attempt, extra_env=env)
                 self.assertEqual(code, 0)
                 outputs.append(out)
 
-        self.assertEqual(outputs[:2], ["", ""])
-        assert_semantic_review(self, outputs[2])
-        ctx = json.loads(outputs[2])["hookSpecificOutput"]["additionalContext"]
+        self.assertEqual(outputs[0], "")
+        assert_semantic_review(self, outputs[1])
+        ctx = json.loads(outputs[1])["hookSpecificOutput"]["additionalContext"]
         self.assertIn("gpt-5.3-codex-spark", ctx)
         self.assertIn("fork_context:false", ctx)
-        self.assertNotIn("distinct failing command", ctx)
-        manifest = extract_manifest(outputs[2])
-        self.assertEqual(manifest["evidence_source"], "hook_observed_payloads")
+        self.assertNotIn("nonexistent-package", ctx)
+        manifest = extract_manifest(outputs[1])
+        self.assertEqual(manifest["evidence_source"], "pre_tool_hook_payloads")
         self.assertEqual(
             [event["outcome"] for event in manifest["events"]],
-            ["failed", "failed", "failed"],
+            ["attempted", "attempted"],
         )
         self.assertEqual(len(manifest["request_id"]), 16)
 
-    def test_semantic_review_cooldown_reopens_at_exact_boundary(self):
-        fail = fresh_session(load_fixture("codex-post-tool-use-fail.json"))
-        outputs = []
-        for index in range(11):
-            event = dict(fail)
-            event["tool_input"] = {"command": f"unique cooldown command {index}"}
-            _, out = run_hook(CODEX, event)
-            outputs.append(out)
-
-        assert_semantic_review(self, outputs[2])
-        self.assertEqual(outputs[3:10], [""] * 7)
-        assert_semantic_review(self, outputs[10])
-
-    def test_exact_and_semantic_signals_can_share_one_output(self):
-        fail_a = fresh_session(load_fixture("codex-post-tool-use-fail.json"))
-        fail_b = dict(fail_a)
-        fail_a["tool_input"] = {"command": "combined signal command a"}
-        fail_b["tool_input"] = {"command": "combined signal command b"}
-
-        run_hook(CODEX, fail_a)
-        run_hook(CODEX, fail_b)
-        _, out = run_hook(CODEX, fail_a)
-
-        parsed = json.loads(out)
-        self.assertIn("same command failed 2x", parsed["systemMessage"])
-        self.assertIn("semantic review requested", parsed["systemMessage"])
-        ctx = parsed["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("this exact command has now failed 2 times", ctx)
-        self.assertIn("Semantic retry candidate", ctx)
+    def test_nonconsecutive_repeat_is_detected_within_window(self):
+        first = fresh_session(load_fixture("codex-pre-tool-use.json"))
+        middle = dict(first)
+        middle["tool_input"] = {"command": "different evidence command"}
+        self.assertEqual(run_hook(CODEX, first)[1], "")
+        self.assertEqual(run_hook(CODEX, middle)[1], "")
+        out = run_hook(CODEX, first)[1]
+        assert_semantic_review(self, out)
 
     def test_invalid_reviewer_config_falls_back_safely(self):
-        fail = fresh_session(load_fixture("codex-post-tool-use-fail.json"))
+        attempt = fresh_session(load_fixture("codex-pre-tool-use.json"))
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "reviewer.json"
             config_path.write_text(json.dumps({
@@ -553,10 +501,8 @@ class CodexDetectorTest(unittest.TestCase):
                 "LEARNING_RETROSPECTIVE_REVIEW_CONFIG": str(config_path),
             }
             out = ""
-            for index in range(3):
-                event = dict(fail)
-                event["tool_input"] = {"command": f"invalid config command {index}"}
-                _, out = run_hook(CODEX, event, extra_env=env)
+            for _ in range(2):
+                _, out = run_hook(CODEX, attempt, extra_env=env)
 
         assert_semantic_review(self, out)
         ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
@@ -613,13 +559,6 @@ sys.stdout.write(json.dumps({"ok": True, "review": review}))
 """
 
 
-def codex_command_key(cwd, command):
-    value = str(cwd or "").strip()
-    normalized = os.path.normcase(os.path.normpath(value)) if value else ""
-    material = normalized + "\n" + str(command or "").strip()
-    return hashlib.sha1(material.encode("utf-8", "replace")).hexdigest()[:12]
-
-
 def extract_automated_review(out):
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
     start = "AUTOMATED_SEMANTIC_REVIEW_RESULT_BEGIN\n"
@@ -645,39 +584,35 @@ class CodexCliBackendTest(unittest.TestCase):
         return detector, {"LEARNING_RETROSPECTIVE_REVIEW_CONFIG": str(config_path)}
 
     def test_valid_stub_review_is_injected_with_bounded_reason(self):
-        fail = fresh_session(load_fixture("codex-post-tool-use-fail.json"))
+        attempt = fresh_session(load_fixture("codex-pre-tool-use.json"))
         with tempfile.TemporaryDirectory() as temp_dir:
             detector, env = self._harness(temp_dir, STUB_REVIEW_RUNNER_VALID)
             outputs = []
-            for index in range(3):
-                event = dict(fail)
-                event["tool_input"] = {"command": f"distinct failing command {index}"}
-                code, out = run_hook(detector, event, extra_env=env)
+            for _ in range(2):
+                code, out = run_hook(detector, attempt, extra_env=env)
                 self.assertEqual(code, 0)
                 outputs.append(out)
 
-        self.assertEqual(outputs[:2], ["", ""])
-        parsed = json.loads(outputs[2])
+        self.assertEqual(outputs[0], "")
+        parsed = json.loads(outputs[1])
         self.assertIn(
             "automated semantic review completed", parsed["systemMessage"]
         )
         ctx = parsed["hookSpecificOutput"]["additionalContext"]
         self.assertIn("untrusted reviewer-model text", ctx)
         self.assertNotIn("Semantic retry candidate", ctx)
-        review = extract_automated_review(outputs[2])
+        review = extract_automated_review(outputs[1])
         self.assertEqual(review["reviewer_agent_id"], "stub-thread-1")
         self.assertLessEqual(len(review["reason"]), 300)
         self.assertNotIn("\n", review["reason"])
 
     def test_invalid_stub_output_falls_back_to_manual_protocol(self):
-        fail = fresh_session(load_fixture("codex-post-tool-use-fail.json"))
+        attempt = fresh_session(load_fixture("codex-pre-tool-use.json"))
         with tempfile.TemporaryDirectory() as temp_dir:
             detector, env = self._harness(temp_dir, STUB_REVIEW_RUNNER_GARBAGE)
             out = ""
-            for index in range(3):
-                event = dict(fail)
-                event["tool_input"] = {"command": f"distinct failing command {index}"}
-                _, out = run_hook(detector, event, extra_env=env)
+            for _ in range(2):
+                _, out = run_hook(detector, attempt, extra_env=env)
 
         assert_semantic_review(self, out)
         ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
@@ -688,14 +623,12 @@ class CodexCliBackendTest(unittest.TestCase):
         stub = STUB_REVIEW_RUNNER_HOSTILE.replace(
             "__LESSON__", "True" if claims_lesson else "False"
         )
-        fail = fresh_session(load_fixture("codex-post-tool-use-fail.json"))
+        attempt = fresh_session(load_fixture("codex-pre-tool-use.json"))
         with tempfile.TemporaryDirectory() as temp_dir:
             detector, env = self._harness(temp_dir, stub)
             out = ""
-            for index in range(3):
-                event = dict(fail)
-                event["tool_input"] = {"command": f"distinct failing command {index}"}
-                _, out = run_hook(detector, event, extra_env=env)
+            for _ in range(2):
+                _, out = run_hook(detector, attempt, extra_env=env)
         return out
 
     def test_detector_rejects_claimed_lesson_without_memory_access(self):
@@ -715,14 +648,12 @@ class CodexCliBackendTest(unittest.TestCase):
         assert_semantic_review(self, out)
 
     def test_activity_candidates_respect_model_call_time_cooldown(self):
-        missing = fresh_session(
-            load_fixture("codex-post-tool-use-missing-exit-code.json")
-        )
+        attempt = fresh_session(load_fixture("codex-pre-tool-use.json"))
         with tempfile.TemporaryDirectory() as temp_dir:
             detector, env = self._harness(temp_dir, STUB_REVIEW_RUNNER_VALID)
             outputs = []
             for _ in range(10):
-                code, out = run_hook(detector, dict(missing), extra_env=env)
+                code, out = run_hook(detector, dict(attempt), extra_env=env)
                 self.assertEqual(code, 0)
                 outputs.append(out)
 
@@ -743,14 +674,14 @@ class CodexCliBackendTest(unittest.TestCase):
 
 class DiagnosticsTest(unittest.TestCase):
     def test_oversized_diagnostics_rotate_instead_of_going_silent(self):
-        fail = fresh_session(load_fixture("codex-post-tool-use-fail.json"))
+        attempt = fresh_session(load_fixture("codex-pre-tool-use.json"))
         with tempfile.TemporaryDirectory() as directory:
             diagnostics = Path(directory) / "diagnostics.jsonl"
             diagnostics.write_text("x" * (1024 * 1024 + 10), encoding="utf-8")
             env = {"LEARNING_RETROSPECTIVE_DIAGNOSTIC_PATH": str(diagnostics)}
-            run_hook(CODEX, fail, extra_env=env)
-            _, out = run_hook(CODEX, fail, extra_env=env)
-            assert_reminder(self, out)
+            run_hook(CODEX, attempt, extra_env=env)
+            _, out = run_hook(CODEX, attempt, extra_env=env)
+            assert_semantic_review(self, out)
             text = diagnostics.read_text(encoding="utf-8")
 
         self.assertLess(len(text), 1024 * 1024, "diagnostics must be rotated")
@@ -761,50 +692,41 @@ class DiagnosticsTest(unittest.TestCase):
         ]
         self.assertIn("diagnostics_rotated", kinds)
         self.assertIn(
-            "reminder_emitted", kinds,
+            "semantic_review_requested", kinds,
             "recording must continue after the cap is crossed",
         )
 
 
 class StatePrivacyAndCapTest(unittest.TestCase):
-    def test_state_cap_keeps_high_failure_counters(self):
-        fail = fresh_session(load_fixture("codex-post-tool-use-fail.json"))
-        fail["cwd"] = "C:\\proj"
+    def test_state_window_is_bounded(self):
+        attempt = fresh_session(load_fixture("codex-pre-tool-use.json"))
+        attempt["cwd"] = "C:\\proj"
         session_key = hashlib.sha1(
-            fail["session_id"].encode("utf-8", "replace")
+            attempt["session_id"].encode("utf-8", "replace")
         ).hexdigest()[:12]
         state_path = (
-            Path(tempfile.gettempdir()) / f"codex-retry-loop-{session_key}.json"
+            Path(tempfile.gettempdir()) / f"codex-retry-attempt-{session_key}.json"
         )
-        hot_command = "hot failing command"
-        hot_key = codex_command_key(fail["cwd"], hot_command)
-        state = {f"dummy{i:03d}": 1 for i in range(205)}
-        state[hot_key] = 7
-        state_path.write_text(json.dumps(state), encoding="utf-8")
-
-        other = dict(fail)
-        other["tool_input"] = {"command": "other failing command"}
-        code, _ = run_hook(CODEX, other)
-        self.assertEqual(code, 0)
-
-        hot = dict(fail)
-        hot["tool_input"] = {"command": hot_command}
-        code, out = run_hook(CODEX, hot)
-        self.assertEqual(code, 0)
-        assert_reminder(self, out, 8)
+        for index in range(30):
+            event = dict(attempt)
+            event["tool_input"] = {"command": f"bounded attempt {index}"}
+            code, _ = run_hook(CODEX, event)
+            self.assertEqual(code, 0)
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(state["__recent__"]), 12)
 
     def test_state_file_contains_no_raw_commands(self):
-        fail = fresh_session(load_fixture("codex-post-tool-use-fail.json"))
+        attempt = fresh_session(load_fixture("codex-pre-tool-use.json"))
         sentinel = "privacy-sentinel-command-xyzzy"
-        fail["tool_input"] = {"command": sentinel}
-        run_hook(CODEX, fail)
-        _, out = run_hook(CODEX, fail)
-        assert_reminder(self, out)
+        attempt["tool_input"] = {"command": sentinel}
+        run_hook(CODEX, attempt)
+        _, out = run_hook(CODEX, attempt)
+        assert_semantic_review(self, out)
         session_key = hashlib.sha1(
-            fail["session_id"].encode("utf-8", "replace")
+            attempt["session_id"].encode("utf-8", "replace")
         ).hexdigest()[:12]
         state_path = (
-            Path(tempfile.gettempdir()) / f"codex-retry-loop-{session_key}.json"
+            Path(tempfile.gettempdir()) / f"codex-retry-attempt-{session_key}.json"
         )
         self.assertNotIn(
             sentinel,

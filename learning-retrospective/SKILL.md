@@ -116,7 +116,8 @@ This skill is normally recalled through its description, which is weakest exactl
 Detection rules:
 
 - Use structured failure status when the harness provides it. When it does
-  not, never guess failure from error keywords; use exact repetition or a
+  not, never guess failure from error keywords. If post-tool callbacks omit
+  failures, observe attempts before execution and use exact repetition or a
   bounded activity window only to request a bounded secondary-agent review.
 - A backend may treat a harness-generated, anchored shell exit envelope as
   structured packet evidence, but must not parse arbitrary command text for
@@ -131,6 +132,9 @@ Evidence rules:
 - The shipped hooks attach a privacy-safe manifest generated from actual hook
   payloads; the main agent must copy the relevant raw tool-event fields into
   the review packet rather than replace them with a free-form summary.
+- The Codex detector's manifest records attempts, not outcomes. Its reviewer
+  must recover prior outcomes from the parent rollout, align attempts in order,
+  and keep the current pre-execution event marked `pending`.
 - The reviewer detects failure-family similarity; a `known_loop` additionally
   requires a source-labelled prior lesson verified by the main agent.
 

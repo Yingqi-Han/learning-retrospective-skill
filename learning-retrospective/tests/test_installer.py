@@ -1,5 +1,6 @@
 """Tests for transactional hook installation."""
 import importlib.util
+import io
 import json
 import os
 import tempfile
@@ -15,6 +16,14 @@ SPEC.loader.exec_module(INSTALLER)
 
 
 class HookInstallerTest(unittest.TestCase):
+    def test_codex_registration_uses_pre_tool_use(self):
+        stream = io.StringIO()
+        with mock.patch("sys.stdout", stream):
+            INSTALLER.print_hook_config("codex")
+        output = stream.getvalue()
+        self.assertIn('"PreToolUse"', output)
+        self.assertNotIn('"PostToolUse"', output)
+
     def test_hook_install_preserves_active_config_and_updates_bundle(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

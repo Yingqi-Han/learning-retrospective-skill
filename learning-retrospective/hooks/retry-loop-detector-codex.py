@@ -1,12 +1,12 @@
-"""Retry-loop detector for Codex.
+"""Retry-loop attempt detector for Codex.
 
-Register on PostToolUse (matcher ^Bash$) in ~/.codex/hooks.json; see
+Register on PreToolUse (matcher ^Bash$) in ~/.codex/hooks.json; see
 references/hook-activation.md for the config snippet, the surface-specific
-trust requirement, and the verification procedure. Codex payloads are not stable:
-some builds expose a structured exit code while others expose output text only.
-Structured payloads retain deterministic failure counting. When the exit status
-is unavailable, the hook requests bounded semantic review based on command
-repetition and shell-activity cadence; it never guesses failure from output text.
+trust requirement, and the verification procedure. Codex currently invokes
+PostToolUse only after successful tools, so a post-only detector cannot observe
+failed attempts. This detector records privacy-safe command signatures before
+execution and asks a bounded reviewer to recover prior outcomes from the parent
+rollout. It never guesses failure from command or output text.
 
 Stdlib-only; safe to run with `python -S`.
 """
@@ -20,18 +20,15 @@ import tempfile
 import time
 import traceback
 
-THRESHOLD = 2
 SEMANTIC_WINDOW_SIZE = 12
-SEMANTIC_FAILURE_THRESHOLD = 3
-SEMANTIC_DISTINCT_COMMANDS = 2
 SEMANTIC_COOLDOWN_CALLS = 8
 ACTIVITY_REVIEW_CALLS = 12
 ACTIVITY_REVIEW_DISTINCT_COMMANDS = 3
 ACTIVITY_REVIEW_MIN_SPAN_SECONDS = 120
 ACTIVITY_REVIEW_COOLDOWN_CALLS = 24
 ACTIVITY_REVIEW_COOLDOWN_SECONDS = 15 * 60
-UNKNOWN_REPEAT_THRESHOLD = 2
-STATE_PREFIX = "codex-retry-loop-"
+ATTEMPT_REPEAT_THRESHOLD = 2
+STATE_PREFIX = "codex-retry-attempt-"
 STATE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 CLEANUP_INTERVAL_SECONDS = 24 * 60 * 60
 DIAGNOSTIC_FILE = "codex-retry-loop-diagnostics.jsonl"
@@ -43,6 +40,7 @@ MAX_REVIEW_TIMEOUT_SECONDS = 45
 MAX_REVIEWER_REASON_CHARS = 300
 MAX_DIAGNOSTIC_BYTES = 1024 * 1024
 _diagnostic_phase = "startup"
+_hook_event_name = "PreToolUse"
 
 if os.environ.get("LEARNING_RETROSPECTIVE_DISABLE") == "1":
     sys.exit(0)
@@ -107,7 +105,7 @@ def fail_safe_excepthook(exc_type, _exc, tb):
                 "privacy-safe diagnostics were recorded."
             ),
             "hookSpecificOutput": {
-                "hookEventName": "PostToolUse",
+                "hookEventName": _hook_event_name,
                 "additionalContext": (
                     "The retry-loop detector encountered an internal error "
                     "and failed open. Do not treat this event as evidence that "
@@ -145,11 +143,6 @@ def cleanup_stale_state(temp_dir):
         pass
 
 
-def should_remind(count):
-    """Remind at 2, 4, 8... failures instead of spamming every retry."""
-    return count >= THRESHOLD and count & (count - 1) == 0
-
-
 def normalize_cwd(cwd):
     value = str(cwd or "").strip()
     return os.path.normcase(os.path.normpath(value)) if value else ""
@@ -160,8 +153,8 @@ def command_signature(cwd, command):
     return hashlib.sha1(material.encode("utf-8", "replace")).hexdigest()[:12]
 
 
-def update_semantic_window(state, key, failed, config=None):
-    """Return a bounded semantic-review candidate without storing raw commands."""
+def update_attempt_window(state, key, config=None):
+    """Return a bounded review candidate from PreToolUse attempts."""
     config = config if isinstance(config, dict) else {}
     activity_review_calls = config.get(
         "activity_review_calls", ACTIVITY_REVIEW_CALLS
@@ -187,16 +180,28 @@ def update_semantic_window(state, key, failed, config=None):
     recent = state.get("__recent__", [])
     if not isinstance(recent, list):
         recent = []
-    recent = [
-        item for item in recent
-        if isinstance(item, dict)
-        and (
-            isinstance(item.get("failed"), bool)
-            or item.get("failed") is None
-        )
-        and isinstance(item.get("key"), str)
-    ]
-    recent.append({"event_index": event_index, "failed": failed, "key": key})
+    sanitized = []
+    for item in recent:
+        if not isinstance(item, dict) or not isinstance(item.get("key"), str):
+            continue
+        observed_at = item.get("observed_at")
+        if (
+            not isinstance(observed_at, int)
+            or isinstance(observed_at, bool)
+            or observed_at > now
+        ):
+            observed_at = now
+        sanitized.append({
+            "event_index": item.get("event_index"),
+            "key": item["key"],
+            "observed_at": observed_at,
+        })
+    recent = sanitized
+    recent.append({
+        "event_index": event_index,
+        "key": key,
+        "observed_at": now,
+    })
     recent = recent[-SEMANTIC_WINDOW_SIZE:]
     first_index = max(1, event_index - len(recent) + 1)
     for offset, item in enumerate(recent):
@@ -204,29 +209,11 @@ def update_semantic_window(state, key, failed, config=None):
         if not isinstance(stored_index, int) or isinstance(stored_index, bool):
             item["event_index"] = first_index + offset
 
-    last_key = state.get("__last_key__")
-    repeat_count = state.get("__repeat_count__", 0)
-    if not isinstance(repeat_count, int) or isinstance(repeat_count, bool):
-        repeat_count = 0
-    repeat_count = repeat_count + 1 if last_key == key else 1
-
     last_review = state.get(
         "__semantic_review_at__", -ACTIVITY_REVIEW_COOLDOWN_CALLS
     )
     if not isinstance(last_review, int) or isinstance(last_review, bool):
         last_review = -ACTIVITY_REVIEW_COOLDOWN_CALLS
-    activity_started = state.get("__activity_started_at__")
-    if (
-        failed is None
-        and (
-            not isinstance(activity_started, int)
-            or isinstance(activity_started, bool)
-            or activity_started > now
-        )
-    ):
-        activity_started = now
-    elif failed is not None:
-        activity_started = None
     last_activity_review = state.get("__activity_review_time__", 0)
     if (
         not isinstance(last_activity_review, int)
@@ -234,50 +221,32 @@ def update_semantic_window(state, key, failed, config=None):
         or last_activity_review > now
     ):
         last_activity_review = 0
-    failed_items = [item for item in recent if item["failed"]]
-    distinct = {item["key"] for item in failed_items}
-    structured_candidate = (
-        failed
-        and len(failed_items) >= SEMANTIC_FAILURE_THRESHOLD
-        and len(distinct) >= SEMANTIC_DISTINCT_COMMANDS
-        and event_index - last_review >= SEMANTIC_COOLDOWN_CALLS
-    )
     activity_distinct = {item["key"] for item in recent}
-    unknown_repeat_candidate = (
-        failed is None
-        and repeat_count >= UNKNOWN_REPEAT_THRESHOLD
+    repeat_count = sum(item["key"] == key for item in recent)
+    exact_attempt_candidate = (
+        repeat_count >= ATTEMPT_REPEAT_THRESHOLD
         and event_index - last_review >= SEMANTIC_COOLDOWN_CALLS
     )
+    window_span = now - recent[0]["observed_at"] if recent else 0
     broad_activity_candidate = (
-        failed is None
-        and repeat_count < UNKNOWN_REPEAT_THRESHOLD
+        not exact_attempt_candidate
         and len(recent) >= activity_review_calls
         and len(activity_distinct) >= ACTIVITY_REVIEW_DISTINCT_COMMANDS
-        and activity_started is not None
-        and now - activity_started >= activity_min_span
+        and window_span >= activity_min_span
         and event_index - last_review >= activity_cooldown_calls
         and now - last_activity_review >= activity_cooldown_seconds
     )
-    activity_candidate = unknown_repeat_candidate or broad_activity_candidate
-    candidate = structured_candidate or activity_candidate
+    candidate = exact_attempt_candidate or broad_activity_candidate
     candidate_reason = (
-        "structured_failures"
-        if structured_candidate
-        else "unknown_exact_repeat"
-        if unknown_repeat_candidate
-        else "sustained_unknown_activity"
+        "exact_attempt_repeat"
+        if exact_attempt_candidate
+        else "sustained_attempt_activity"
         if broad_activity_candidate
         else "none"
     )
 
     state["__event_index__"] = event_index
     state["__recent__"] = recent
-    state["__last_key__"] = key
-    state["__repeat_count__"] = repeat_count
-    if activity_started is None:
-        state.pop("__activity_started_at__", None)
-    else:
-        state["__activity_started_at__"] = activity_started
     if candidate:
         state["__semantic_review_at__"] = event_index
     if broad_activity_candidate:
@@ -286,26 +255,17 @@ def update_semantic_window(state, key, failed, config=None):
         "candidate": candidate,
         "candidate_reason": candidate_reason,
         "event_index": event_index,
-        "evidence_mode": (
-            "structured_failures" if structured_candidate else "activity_window"
-        ),
-        "failure_count": len(failed_items),
-        "distinct_commands": (
-            len(distinct) if structured_candidate else len(activity_distinct)
-        ),
+        "evidence_mode": "attempt_window",
+        "failure_count": 0,
+        "distinct_commands": len(activity_distinct),
         "repeat_count": repeat_count,
         "window_size": len(recent),
+        "window_span_seconds": window_span,
         "events": [
             {
                 "event_index": item["event_index"],
                 "command_signature": item["key"],
-                "outcome": (
-                    "failed"
-                    if item["failed"] is True
-                    else "succeeded"
-                    if item["failed"] is False
-                    else "unknown"
-                ),
+                "outcome": "attempted",
             }
             for item in recent
         ],
@@ -475,8 +435,9 @@ def run_automated_review(manifest, hook_payload, config=None):
         "hook_payload": {
             "session_id": hook_payload.get("session_id"),
             "cwd": hook_payload.get("cwd"),
+            "hook_event_name": hook_payload.get("hook_event_name"),
+            "tool_use_id": hook_payload.get("tool_use_id"),
             "tool_input": hook_payload.get("tool_input"),
-            "tool_response": hook_payload.get("tool_response"),
         },
     }
     env = dict(os.environ)
@@ -561,7 +522,7 @@ def build_evidence_manifest(signal, session_key):
     """Build a privacy-safe manifest from events observed by the hook itself."""
     core = {
         "schema_version": 1,
-        "evidence_source": "hook_observed_payloads",
+        "evidence_source": "pre_tool_hook_payloads",
         "evidence_mode": signal["evidence_mode"],
         "candidate_reason": signal["candidate_reason"],
         "events": signal["events"],
@@ -585,19 +546,11 @@ def semantic_review_context(signal, manifest, config=None):
         if model
         else "Use any available fast, low-cost secondary agent. "
     )
-    if signal["evidence_mode"] == "structured_failures":
-        evidence = (
-            f"{signal['failure_count']} failed Bash calls among the last "
-            f"{signal['window_size']}, across {signal['distinct_commands']} "
-            "different command signatures"
-        )
-    else:
-        evidence = (
-            "this Codex build did not expose a structured shell exit status; "
-            f"the activity window contains {signal['window_size']} calls across "
-            f"{signal['distinct_commands']} command signatures, with a current "
-            f"exact-repeat count of {signal['repeat_count']}"
-        )
+    evidence = (
+        f"the PreToolUse attempt window contains {signal['window_size']} Bash "
+        f"attempts across {signal['distinct_commands']} command signatures, "
+        f"with the current signature observed {signal['repeat_count']} times"
+    )
     fallback = {
         "schema_version": 1,
         "request_id": manifest["request_id"],
@@ -618,8 +571,9 @@ def semantic_review_context(signal, manifest, config=None):
         "Semantic retry candidate, not a confirmed loop: "
         + evidence
         + ". The following manifest was generated from actual hook payloads. "
-        "It proves event order, command signatures, and any structured outcome, "
-        "while intentionally omitting raw commands and output.\n"
+        "It proves attempted event order and command signatures, but not command "
+        "outcomes; the current attempt has not executed yet. Raw commands and "
+        "output are intentionally omitted.\n"
         "HOOK_EVIDENCE_MANIFEST_BEGIN\n"
         + manifest_json
         + "\nHOOK_EVIDENCE_MANIFEST_END\n"
@@ -680,8 +634,8 @@ def semantic_review_context(signal, manifest, config=None):
         "with evidence_adequate=false and should_interrupt=true as invalid. "
         "A user-requested repetition, test probe, "
         "or evidence-producing variation is not a retry loop by itself. In "
-        "activity-window mode, never return known_loop solely from repetition: "
-        "require concrete failed outcomes in the supplied transcript plus an "
+        "attempt-window mode, never return known_loop solely from repetition: "
+        "require concrete prior failed outcomes in the supplied transcript plus an "
         "applicable prior lesson or verified fact. Otherwise set should_interrupt "
         "to false and use uncertain, routine_failure, or novel_exploration. If no "
         "multi-agent tool exists, explicitly report reviewer_unavailable before "
@@ -714,6 +668,16 @@ if not isinstance(data, dict):
     sys.exit(0)
 
 _diagnostic_phase = "validate_input"
+event_name = data.get("hook_event_name")
+if event_name != "PreToolUse":
+    append_diagnostic(
+        "unsupported_input",
+        reason="hook_event_mismatch",
+        hook_event_name_type=type(event_name).__name__,
+        phase=_diagnostic_phase,
+    )
+    sys.exit(0)
+_hook_event_name = event_name
 if data.get("tool_name") != "Bash":
     append_diagnostic(
         "unsupported_input",
@@ -740,16 +704,6 @@ command = command_value.strip()
 if not command:
     sys.exit(0)
 
-_diagnostic_phase = "classify_result"
-resp = data.get("tool_response")
-exit_code = None
-if isinstance(resp, dict):
-    for k in ("exit_code", "exitCode"):
-        if isinstance(resp.get(k), int) and not isinstance(resp.get(k), bool):
-            exit_code = resp[k]
-            break
-failed = None if exit_code is None else exit_code != 0
-
 # Hash externally supplied values before using them in paths or keys:
 # session_id could contain path separators; the same command in two
 # different working directories is not the same action.
@@ -773,20 +727,12 @@ if not isinstance(state, dict):
     state = {}
 
 _diagnostic_phase = "update_state"
-if failed is True:
-    previous = state.get(key, 0)
-    if not isinstance(previous, int) or isinstance(previous, bool):
-        previous = 0
-    state[key] = previous + 1
-elif failed is False:
-    state.pop(key, None)
-
 review_config = load_reviewer_config()
-semantic_signal = update_semantic_window(state, key, failed, review_config)
+semantic_signal = update_attempt_window(state, key, review_config)
 
 # Gate automated model calls by wall-clock time as well as event count:
-# activity-only candidates (exact unknown repeats included) may otherwise
-# stall the session and spend a paid model call every few tool events.
+# attempt candidates may otherwise stall the session and spend a paid model
+# call every few tool events.
 _diagnostic_phase = "gate_automated_review"
 now_ts = int(time.time())
 last_automated = state.get("__automated_review_time__", 0)
@@ -799,47 +745,11 @@ if (
 automated_review_allowed = bool(
     semantic_signal["candidate"]
     and review_config["review_backend"] == "codex_cli"
-    and (
-        semantic_signal["evidence_mode"] == "structured_failures"
-        or now_ts - last_automated
-        >= review_config["activity_review_cooldown_seconds"]
-    )
+    and now_ts - last_automated
+    >= review_config["activity_review_cooldown_seconds"]
 )
 if automated_review_allowed:
     state["__automated_review_time__"] = now_ts
-
-if len(state) > 205:  # cap command counters while preserving control metadata
-    preserved = {
-        name: state[name]
-        for name in (
-            "__event_index__",
-            "__recent__",
-            "__semantic_review_at__",
-            "__last_key__",
-            "__repeat_count__",
-            "__activity_started_at__",
-            "__activity_review_time__",
-            "__automated_review_time__",
-        )
-        if name in state
-    }
-    # Keep the highest counters instead of dropping every other command's
-    # failure count mid-backoff; only the long tail of singletons is shed.
-    counters = sorted(
-        (
-            (name, value)
-            for name, value in state.items()
-            if name not in preserved
-            and isinstance(value, int)
-            and not isinstance(value, bool)
-        ),
-        key=lambda item: item[1],
-        reverse=True,
-    )
-    preserved.update(dict(counters[:100]))
-    if key in state:
-        preserved[key] = state[key]
-    state = preserved
 
 _diagnostic_phase = "write_state"
 try:
@@ -859,10 +769,6 @@ except Exception:
         pass
 
 _diagnostic_phase = "emit_reminder"
-count = state.get(key, 0)
-if not isinstance(count, int) or isinstance(count, bool):
-    count = 0
-exact_reminder = failed is True and should_remind(count)
 semantic_candidate = semantic_signal["candidate"]
 semantic_manifest = (
     build_evidence_manifest(semantic_signal, session_key)
@@ -878,17 +784,16 @@ if semantic_candidate:
         )
     elif review_config["review_backend"] == "codex_cli":
         automated_review_error = "automated_review_cooldown"
-if exact_reminder:
-    append_diagnostic("reminder_emitted", failure_count=count)
 if semantic_candidate:
     append_diagnostic(
         "semantic_review_requested",
         evidence_mode=semantic_signal["evidence_mode"],
         candidate_reason=semantic_signal["candidate_reason"],
-        failure_count=semantic_signal["failure_count"],
+        attempt_count=semantic_signal["repeat_count"],
         distinct_commands=semantic_signal["distinct_commands"],
         repeat_count=semantic_signal["repeat_count"],
         window_size=semantic_signal["window_size"],
+        window_span_seconds=semantic_signal["window_span_seconds"],
         request_id=semantic_manifest["request_id"],
     )
     if automated_review:
@@ -905,34 +810,24 @@ if semantic_candidate:
             request_id=semantic_manifest["request_id"],
             reason=automated_review_error,
         )
-if exact_reminder or semantic_candidate:
+if semantic_candidate:
     contexts = []
     system_messages = []
-    if exact_reminder:
-        system_messages.append(f"same command failed {count}x")
-        contexts.append(
-            f"Retry-loop detector: this exact command has now failed "
-            f"{count} times in this session. Do not run it again unchanged. "
-            "First check stored lessons/memory for this failure signature. "
-            "If none exists, continue only with a changed hypothesis and "
-            "capture the verified lesson after solving it."
+    if automated_review:
+        system_messages.append("automated semantic review completed")
+        contexts.append(automated_review_context(automated_review))
+    else:
+        system_messages.append("semantic review requested")
+        manual_context = semantic_review_context(
+            semantic_signal, semantic_manifest, review_config
         )
-    if semantic_candidate:
-        if automated_review:
-            system_messages.append("automated semantic review completed")
-            contexts.append(automated_review_context(automated_review))
-        else:
-            system_messages.append("semantic review requested")
-            manual_context = semantic_review_context(
-                semantic_signal, semantic_manifest, review_config
+        if automated_review_error:
+            manual_context = (
+                "The explicitly configured automated reviewer was unavailable "
+                f"({automated_review_error}). Do not fabricate a reviewer "
+                "result.\n" + manual_context
             )
-            if automated_review_error:
-                manual_context = (
-                    "The explicitly configured automated reviewer was unavailable "
-                    f"({automated_review_error}). Do not fabricate a reviewer "
-                    "result.\n" + manual_context
-                )
-            contexts.append(manual_context)
+        contexts.append(manual_context)
     print(json.dumps({
         # systemMessage is shown to the USER in the UI; additionalContext is
         # injected into the MODEL's context. Both matter: an invisible
@@ -941,7 +836,7 @@ if exact_reminder or semantic_candidate:
             "Retry-loop detector: " + "; ".join(system_messages) + "."
         ),
         "hookSpecificOutput": {
-            "hookEventName": "PostToolUse",
+            "hookEventName": "PreToolUse",
             "additionalContext": "\n\n".join(contexts),
         }
     }))

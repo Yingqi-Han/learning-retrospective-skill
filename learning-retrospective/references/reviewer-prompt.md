@@ -33,8 +33,8 @@ Answer briefly:
 
 ## Semantic Loop Classifier
 
-When a hook reports a structured failure window or an activity-only candidate
-with unknown exit status, do not use the lesson-review template above.
+When a hook reports a structured failure window or a pre-execution attempt
+candidate, do not use the lesson-review template above.
 Use the evidence-bound classifier protocol in `semantic-review.md` — it is the
 single canonical definition of the input packet, the required JSON output
 schema, the one-correction rule, and the decision gate. This file
