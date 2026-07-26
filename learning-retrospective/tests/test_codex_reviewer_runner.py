@@ -271,6 +271,101 @@ class CodexReviewerRunnerTest(unittest.TestCase):
         self.assertEqual(packet["tool_events"][-1]["outcome"], "failed")
         self.assertEqual(packet["tool_events"][-1]["exit_code"], 1)
 
+    def _real_shape_request(self, command, manifest_command, repeats=3):
+        """Request shaped like a real Codex build: the hook payload has no
+        per-call workdir (the detector hashed the session cwd), while the
+        rollout records each call's own workdir in a subdirectory."""
+        session_cwd = "D:\\proj"
+        call_workdir = "D:\\proj\\sub"
+        detector_signature = RUNNER.command_signature(
+            session_cwd, manifest_command
+        )
+        manifest = {
+            "request_id": "real-shape",
+            "events": [
+                {"command_signature": detector_signature}
+            ] * repeats,
+        }
+        records = [
+            {"type": "session_meta", "payload": {"cwd": session_cwd}},
+        ]
+        for index in range(repeats):
+            records.append({
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "call_id": f"call-{index}",
+                    "arguments": json.dumps(
+                        {"command": command, "workdir": call_workdir}
+                    ),
+                },
+            })
+            records.append({
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call_output",
+                    "call_id": f"call-{index}",
+                    "output": "Exit code: 1\nOutput:\nboom",
+                },
+            })
+        return session_cwd, manifest, records
+
+    def _packet_from_rollout(self, session_cwd, manifest, records, command):
+        with tempfile.TemporaryDirectory() as directory:
+            codex_home = Path(directory) / "codex-home"
+            session_dir = codex_home / "sessions" / "2026" / "07" / "26"
+            session_dir.mkdir(parents=True)
+            session_id = "01890000-0000-7000-8000-00000000abcd"
+            rollout = session_dir / (
+                f"rollout-2026-07-26T00-00-00-{session_id}.jsonl"
+            )
+            rollout.write_text(
+                "\n".join(json.dumps(record) for record in records),
+                encoding="utf-8",
+            )
+            with mock.patch.dict(
+                os.environ, {"CODEX_HOME": str(codex_home)}, clear=False
+            ):
+                return RUNNER.build_review_packet({
+                    "manifest": manifest,
+                    "hook_payload": {
+                        "session_id": session_id,
+                        "cwd": session_cwd,
+                        "tool_input": {"command": command},
+                        "tool_response": {"exit_code": 1, "output": "boom"},
+                    },
+                })
+
+    def test_manifest_matches_despite_per_call_workdir(self):
+        # Regression: observed live 2026-07-26 — the detector hashed the
+        # session cwd while the rollout recorded per-call workdirs, so the
+        # manifest never matched and the current event was double-counted.
+        command = "python run.py"
+        session_cwd, manifest, records = self._real_shape_request(
+            command, command
+        )
+        packet = self._packet_from_rollout(
+            session_cwd, manifest, records, command
+        )
+        self.assertTrue(packet["parent_rollout_found"])
+        self.assertTrue(packet["manifest_matches_event_tail"])
+        self.assertEqual(
+            len(packet["tool_events"]), 3,
+            "current event must dedupe into the last rollout event",
+        )
+        for event in packet["tool_events"]:
+            self.assertNotIn("signature_candidates", event)
+
+    def test_cwd_tolerance_does_not_match_a_different_command(self):
+        command = "python run.py"
+        session_cwd, manifest, records = self._real_shape_request(
+            command, "python other.py"
+        )
+        packet = self._packet_from_rollout(
+            session_cwd, manifest, records, command
+        )
+        self.assertFalse(packet["manifest_matches_event_tail"])
+
     def test_prepare_isolated_home_copies_only_auth(self):
         with tempfile.TemporaryDirectory() as directory:
             parent_home = Path(directory) / "parent"

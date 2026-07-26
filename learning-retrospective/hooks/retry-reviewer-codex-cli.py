@@ -308,7 +308,24 @@ def extract_shell_outcome(value):
     return "unknown", None
 
 
-def extract_rollout_evidence(path):
+def signature_candidates(call_cwd, hook_cwd, command):
+    """Signatures this call may have under either legitimate cwd source.
+
+    The detector hashes `tool_input.workdir or payload.cwd`; real Codex hook
+    payloads carry no per-call workdir, so it hashes the session cwd. The
+    rollout records the per-call workdir. Recomputing with only one source
+    made manifest_matches_event_tail false whenever a command ran in a
+    subdirectory (observed live, 2026-07-26). The command text stays part of
+    every candidate, so matching still binds command identity and order.
+    """
+    candidates = [command_signature(call_cwd, command)]
+    alternate = command_signature(hook_cwd, command)
+    if alternate not in candidates:
+        candidates.append(alternate)
+    return candidates
+
+
+def extract_rollout_evidence(path, hook_cwd=None):
     """Extract the latest user goal and completed shell events from a rollout."""
     latest_goal = ""
     active_cwd = ""
@@ -349,12 +366,14 @@ def extract_rollout_evidence(path):
             call = calls.get(call_id)
             if call:
                 outcome, exit_code = extract_shell_outcome(item.get("output"))
+                candidates = signature_candidates(
+                    call["cwd"], hook_cwd, call["command"]
+                )
                 events.append({
                     "command": redact(call["command"].strip()),
                     "cwd": redact(call["cwd"], 240),
-                    "command_signature": command_signature(
-                        call["cwd"], call["command"]
-                    ),
+                    "command_signature": candidates[0],
+                    "signature_candidates": candidates,
                     "outcome": outcome,
                     "exit_code": exit_code,
                     "outcome_excerpt": redact(
@@ -370,34 +389,39 @@ def build_review_packet(request):
     if not isinstance(manifest, dict) or not isinstance(payload, dict):
         raise ValueError("invalid_request")
 
+    hook_cwd = payload.get("cwd")
     goal = ""
     events = []
     rollout = find_rollout(str(payload.get("session_id") or ""))
     if rollout:
-        goal, events = extract_rollout_evidence(rollout)
+        goal, events = extract_rollout_evidence(rollout, hook_cwd)
 
     tool_input = payload.get("tool_input")
     tool_input = tool_input if isinstance(tool_input, dict) else {}
     command = tool_input.get("command")
     command = command if isinstance(command, str) else ""
-    current_cwd = tool_input.get("workdir") or payload.get("cwd")
+    current_cwd = tool_input.get("workdir") or hook_cwd
     current_outcome, current_exit_code = extract_shell_outcome(
         payload.get("tool_response")
     )
+    current_candidates = signature_candidates(current_cwd, hook_cwd, command)
     current = {
         "command": redact(command.strip()),
         "cwd": redact(current_cwd, 240),
-        "command_signature": command_signature(current_cwd, command),
+        "command_signature": current_candidates[0],
+        "signature_candidates": current_candidates,
         "outcome": current_outcome,
         "exit_code": current_exit_code,
         "outcome_excerpt": redact(
             response_output_text(payload.get("tool_response"))
         ),
     }
-    if not events or events[-1]["command_signature"] != current["command_signature"]:
-        events.append(current)
-    else:
+    if events and set(events[-1]["signature_candidates"]) & set(current_candidates):
+        # Same call seen through both sources; the hook payload's structured
+        # outcome is the fresher record.
         events[-1] = current
+    else:
+        events.append(current)
     events = events[-MAX_EVENTS:]
 
     manifest_events = manifest.get("events")
@@ -407,9 +431,15 @@ def build_review_packet(request):
         for item in manifest_events
         if isinstance(item, dict)
     ]
-    observed_signatures = [
-        item["command_signature"] for item in events[-len(expected_signatures):]
-    ] if expected_signatures else []
+    observed_tail = events[-len(expected_signatures):] if expected_signatures else []
+    manifest_matches = bool(expected_signatures) and len(observed_tail) == len(
+        expected_signatures
+    ) and all(
+        expected in item["signature_candidates"]
+        for expected, item in zip(expected_signatures, observed_tail)
+    )
+    for item in events:
+        del item["signature_candidates"]
 
     return {
         "packet_schema": "REVIEW_PACKET_V1",
@@ -422,10 +452,7 @@ def build_review_packet(request):
         # agent may later supply bounded, source-labelled candidates in the
         # manual protocol before promoting a repeated pattern to a known loop.
         "prior_lesson_candidates": [],
-        "manifest_matches_event_tail": (
-            bool(expected_signatures)
-            and observed_signatures == expected_signatures
-        ),
+        "manifest_matches_event_tail": manifest_matches,
     }
 
 

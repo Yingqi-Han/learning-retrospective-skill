@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.8.4 - 2026-07-26
+
+Fixes a manifest-matching defect found by an independent cross-check (Codex)
+against a live triggered review on a real session.
+
+- Fix cwd signature mismatch between the detector and the reviewer: the
+  detector hashes `tool_input.workdir or payload.cwd`, and real Codex hook
+  payloads carry no per-call workdir, so it hashes the session cwd; the
+  reviewer recomputed signatures from the rollout's per-call `workdir`. Any
+  command that ran in a subdirectory therefore never matched, and
+  `manifest_matches_event_tail` was false on a genuine loop (observed live
+  2026-07-26), downgrading the reviewer's evidence for exactly the events the
+  detector had confidently counted. The reviewer now accepts either legitimate
+  cwd source per event; the command text stays part of every candidate, so
+  matching still binds command identity and order.
+- Fix double-counting of the current event: the same signature skew made the
+  hook-payload event fail to dedupe into its own rollout record, inflating the
+  event tail by one.
+- Tests: regression with the real payload shape (session-cwd manifest +
+  per-call-workdir rollout) asserting both the match and the dedupe, plus a
+  negative test that a different command still fails to match. Suite: 72
+  tests.
+
 ## 0.8.3 - 2026-07-26
 
 Second hardening pass, from an adversarial self-review of 0.8.2 plus an audit
