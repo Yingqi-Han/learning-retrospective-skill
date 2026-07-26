@@ -29,6 +29,7 @@ ACTIVITY_REVIEW_COOLDOWN_CALLS = 24
 ACTIVITY_REVIEW_COOLDOWN_SECONDS = 15 * 60
 ATTEMPT_REPEAT_THRESHOLD = 2
 STATE_PREFIX = "codex-retry-attempt-"
+LEGACY_STATE_PREFIX = "codex-retry-loop-"
 STATE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 CLEANUP_INTERVAL_SECONDS = 24 * 60 * 60
 DIAGNOSTIC_FILE = "codex-retry-loop-diagnostics.jsonl"
@@ -134,9 +135,18 @@ def cleanup_stale_state(temp_dir):
             pass
         os.utime(marker, None)
         for name in os.listdir(temp_dir):
+            path = os.path.join(temp_dir, name)
+            # State from the pre-0.8.7 PostToolUse lifecycle is dead data the
+            # new prefix will never read or clean; remove it on sight. The
+            # diagnostics file shares the legacy prefix but ends in .jsonl,
+            # so both filters leave it alone.
+            if name.startswith(LEGACY_STATE_PREFIX) and (
+                name.endswith(".json") or name == f"{LEGACY_STATE_PREFIX}cleanup"
+            ):
+                os.remove(path)
+                continue
             if not (name.startswith(STATE_PREFIX) and name.endswith(".json")):
                 continue
-            path = os.path.join(temp_dir, name)
             if now - os.path.getmtime(path) > STATE_MAX_AGE_SECONDS:
                 os.remove(path)
     except Exception:

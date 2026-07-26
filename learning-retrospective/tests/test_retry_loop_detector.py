@@ -672,6 +672,33 @@ class CodexCliBackendTest(unittest.TestCase):
         self.assertNotIn("AUTOMATED_SEMANTIC_REVIEW_RESULT_BEGIN", cooldown_ctx)
 
 
+class LegacyStateCleanupTest(unittest.TestCase):
+    def test_pre_087_post_tool_state_is_swept(self):
+        payload = fresh_session(load_fixture("codex-pre-tool-use.json"))
+        with tempfile.TemporaryDirectory() as directory:
+            temp = Path(directory)
+            legacy_state = temp / "codex-retry-loop-abcdef123456.json"
+            legacy_state.write_text("{}", encoding="utf-8")
+            legacy_marker = temp / "codex-retry-loop-cleanup"
+            legacy_marker.write_text("", encoding="utf-8")
+            diagnostics = temp / "codex-retry-loop-diagnostics.jsonl"
+            diagnostics.write_text('{"kind":"probe"}\n', encoding="utf-8")
+
+            run_hook(CODEX, payload, extra_env={
+                "TMP": str(temp), "TEMP": str(temp), "TMPDIR": str(temp),
+            })
+
+            self.assertFalse(
+                legacy_state.exists(),
+                "dead PostToolUse-era state must be swept",
+            )
+            self.assertFalse(legacy_marker.exists())
+            self.assertTrue(
+                diagnostics.exists(),
+                "the shared-prefix diagnostics file must survive the sweep",
+            )
+
+
 class DiagnosticsTest(unittest.TestCase):
     def test_oversized_diagnostics_rotate_instead_of_going_silent(self):
         attempt = fresh_session(load_fixture("codex-pre-tool-use.json"))

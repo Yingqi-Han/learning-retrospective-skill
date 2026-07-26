@@ -388,21 +388,33 @@ def extract_rollout_evidence(path, hook_cwd=None):
 
 
 def align_manifest_events(expected_signatures, events):
-    """Align hook attempts to rollout attempts as an ordered subsequence."""
+    """Align hook attempts to rollout attempts as an ordered subsequence.
+
+    Matches from the END, choosing the latest feasible rollout event for each
+    hook attempt. The hook window is the tail of the attempt history, so the
+    alignment must be anchored at the newest events: forward-greedy matching
+    anchored an alternating retry loop (X,Y,X,Y,...) to the OLDEST occurrence
+    of the pattern whenever the rollout kept more history than the hook
+    window, which made the current attempt appear unmatched exactly when the
+    session looked most loop-like. Backward-greedy is complete (it finds an
+    alignment whenever one exists) and maximizes the final matched index, so
+    if any alignment ends at the current attempt, this one does.
+    """
     if not expected_signatures or not events:
         return False, [], 0
     matched = []
-    cursor = 0
-    for expected in expected_signatures:
-        while cursor < len(events):
+    cursor = len(events) - 1
+    for expected in reversed(expected_signatures):
+        while cursor >= 0:
             candidates = events[cursor].get("signature_candidates", [])
             if expected in candidates:
                 matched.append(cursor)
-                cursor += 1
+                cursor -= 1
                 break
-            cursor += 1
+            cursor -= 1
         else:
-            return False, matched, 0
+            return False, [], 0
+    matched.reverse()
     skipped = matched[-1] - matched[0] + 1 - len(matched)
     return True, matched, skipped
 

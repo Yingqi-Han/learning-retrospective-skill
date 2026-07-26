@@ -432,6 +432,59 @@ class CodexReviewerRunnerTest(unittest.TestCase):
         self.assertEqual(packet["manifest_alignment_mode"], "ordered_subsequence")
         self.assertEqual(packet["manifest_event_skip_count"], 1)
 
+    def test_alignment_anchors_to_latest_occurrence(self):
+        # Regression: forward-greedy alignment anchored the hook window to
+        # the OLDEST rollout occurrence of a repeated pattern, so whenever
+        # the rollout kept more history than the hook window the current
+        # attempt appeared unmatched — exactly in the most loop-like
+        # sessions. Alignment must anchor to the newest events.
+        command = "python run.py"
+        session_cwd, manifest, records = self._real_shape_request(
+            command, command
+        )
+        older = []
+        for index in range(3):
+            older.append({
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "call_id": f"old-{index}",
+                    "arguments": json.dumps(
+                        {"command": command, "workdir": "D:\\proj\\sub"}
+                    ),
+                },
+            })
+            older.append({
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call_output",
+                    "call_id": f"old-{index}",
+                    "output": "Exit code: 1\nOutput:\nboom",
+                },
+            })
+        records[1:1] = older
+        packet = self._packet_from_rollout(
+            session_cwd, manifest, records, command
+        )
+        self.assertTrue(packet["manifest_matches_event_sequence"])
+        self.assertTrue(packet["manifest_current_event_matched"])
+        self.assertEqual(packet["manifest_event_skip_count"], 0)
+
+    def test_alignment_prefers_latest_alternating_occurrence(self):
+        def ev(sig):
+            return {"signature_candidates": [sig]}
+        events = [ev(s) for s in ("X", "Y", "X", "Y", "X", "Y", "X", "Y")]
+        aligned, matched, skipped = RUNNER.align_manifest_events(
+            ["X", "Y", "X", "Y"], events
+        )
+        self.assertTrue(aligned)
+        self.assertEqual(
+            matched, [4, 5, 6, 7],
+            "the hook window is the tail of history; alignment must end at "
+            "the newest events, not the oldest matching span",
+        )
+        self.assertEqual(skipped, 0)
+
     def test_prepare_isolated_home_copies_only_auth(self):
         with tempfile.TemporaryDirectory() as directory:
             parent_home = Path(directory) / "parent"
