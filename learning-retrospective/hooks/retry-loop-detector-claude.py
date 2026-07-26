@@ -28,6 +28,7 @@ REVIEW_CONFIG_FILE = "learning-retrospective-reviewer.json"
 REVIEW_CONFIG_PATH_ENV = "LEARNING_RETROSPECTIVE_REVIEW_CONFIG"
 DIAGNOSTIC_FILE = "claude-retry-loop-diagnostics.jsonl"
 DIAGNOSTIC_PATH_ENV = "LEARNING_RETROSPECTIVE_DIAGNOSTIC_PATH"
+MAX_DIAGNOSTIC_BYTES = 1024 * 1024
 _diagnostic_phase = "startup"
 
 
@@ -42,8 +43,19 @@ def append_diagnostic(kind, **fields):
         path = os.environ.get(DIAGNOSTIC_PATH_ENV) or os.path.join(
             tempfile.gettempdir(), DIAGNOSTIC_FILE
         )
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, sort_keys=True) + "\n")
+        # O_NOFOLLOW (where available) refuses symlinked diagnostic files in
+        # shared temp directories; the size cap stops unbounded growth.
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(path, flags, 0o600)
+        try:
+            if os.fstat(fd).st_size <= MAX_DIAGNOSTIC_BYTES:
+                os.write(
+                    fd,
+                    (json.dumps(record, sort_keys=True) + "\n").encode("utf-8"),
+                )
+        finally:
+            os.close(fd)
     except Exception:
         pass
 
@@ -358,6 +370,20 @@ if len(state) > 205:  # cap command counters while preserving control metadata
         for name in ("__event_index__", "__recent__", "__semantic_review_at__")
         if name in state
     }
+    # Keep the highest counters instead of dropping every other command's
+    # failure count mid-backoff; only the long tail of singletons is shed.
+    counters = sorted(
+        (
+            (name, value)
+            for name, value in state.items()
+            if name not in preserved
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+        ),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    preserved.update(dict(counters[:100]))
     if key in state:
         preserved[key] = state[key]
     state = preserved
@@ -367,7 +393,12 @@ try:
     pending_path = f"{state_path}.{os.getpid()}.tmp"
     with open(pending_path, "w", encoding="utf-8") as f:
         json.dump(state, f)
-    os.replace(pending_path, state_path)
+    try:
+        os.replace(pending_path, state_path)
+    except OSError:
+        # A concurrent hook instance may briefly hold the file on Windows.
+        time.sleep(0.05)
+        os.replace(pending_path, state_path)
 except Exception:
     try:
         os.remove(pending_path)

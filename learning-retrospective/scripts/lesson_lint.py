@@ -12,7 +12,7 @@ Checks (see SECURITY_NOTES.md for the rationale):
     - missing durability sections: Trigger, Verified Facts,
       Preferred Procedure, Scope, Last Verified
     - unverified language inside Verified Facts (probably / might /
-      I think / seems / 大概 / 可能 / 应该是)
+      I think / seems / 大概 / 可能 / 应该是 / 好像)
 
 Exit code 0 = clean, 1 = findings, 2 = usage error. Stdlib-only.
 """
@@ -47,16 +47,22 @@ def lint_text(text, name="<stdin>"):
 
     in_block = False
     block_start = 0
+    fence_len = 0
+    fence_pat = re.compile(r"^(`{3,})(.*)$")
     for i, line in enumerate(lines, 1):
-        if line.strip().startswith("```"):
-            if not in_block:
-                in_block, block_start = True, i
-            else:
-                in_block = False
-                if i - block_start - 1 > MAX_BLOCK_LINES:
-                    findings.append(
-                        f"{name}:{block_start}: code block with {i - block_start - 1} lines "
-                        f"looks like a raw log dump; keep only the first actionable error")
+        m = fence_pat.match(line.strip())
+        if not m:
+            continue
+        if not in_block:
+            in_block, fence_len, block_start = True, len(m.group(1)), i
+        elif len(m.group(1)) >= fence_len and not m.group(2).strip():
+            # A close fence must be at least as long as the opener and bare,
+            # so a ``` line inside a ````-fenced example stays inside it.
+            in_block = False
+            if i - block_start - 1 > MAX_BLOCK_LINES:
+                findings.append(
+                    f"{name}:{block_start}: code block with {i - block_start - 1} lines "
+                    f"looks like a raw log dump; keep only the first actionable error")
 
     section_pat = re.compile(r"^#{1,6}\s+(.*)$")
     sections = {m.group(1).strip() for l in lines if (m := section_pat.match(l))}

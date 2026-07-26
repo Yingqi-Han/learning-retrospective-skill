@@ -21,7 +21,11 @@ detector requests review after an exact repeat. A broad activity-only review
 requires 12 calls containing at least three command hashes over at least 120
 seconds. It then waits at least 24 additional calls and 15 minutes before
 another broad activity review; exact repeats retain the shorter eight-call
-semantic cooldown. Commands and outputs are not stored in rolling state; only
+semantic cooldown for injected reminders, but with the opt-in `codex_cli`
+backend an activity-window candidate spends at most one automated model call
+per `activity_review_cooldown_seconds` (default 900); later candidates inside
+that window fall back to the manual protocol with the reason
+`automated_review_cooldown`. Commands and outputs are not stored in rolling state; only
 event indexes, command hashes, timestamps, and booleans/null result markers are
 retained. When review is requested, the hook injects a
 `HOOK_EVIDENCE_MANIFEST` generated from those actual payload observations.

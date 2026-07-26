@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.8.2 - 2026-07-26
+
+Hardening release after an adversarial code review of the 0.8.x reviewer
+backend.
+
+- Bound the reviewer `reason` field: the runner flattens whitespace and caps
+  it at 300 characters after schema validation, the detector applies the same
+  bound as defense in depth, and the injected wrapper now labels the field as
+  untrusted reviewer-model text. Previously an unbounded, multi-line `reason`
+  was embedded verbatim into the parent context, forming a prompt-injection
+  relay for hostile packet text.
+- Sweep stale `lr-review-*` per-call directories older than one hour when the
+  runner starts. A hard-killed runner (e.g. the detector's own subprocess
+  timeout on Windows) never reached `TemporaryDirectory` cleanup, so its
+  copied `auth.json` could persist indefinitely.
+- Read structured integer exit codes from dict-shaped `tool_response`
+  payloads in the review packet builder. Previously the dict was stringified,
+  the anchored-envelope match failed, and exactly the well-evidenced
+  structured-failure case was reported to the reviewer as `unknown` with a
+  Python-repr excerpt.
+- Gate automated model calls by wall-clock time: activity-window candidates
+  (exact unknown repeats included) now spend at most one `codex_cli` call per
+  `activity_review_cooldown_seconds` (default 900); later candidates fall
+  back to the manual protocol with reason `automated_review_cooldown`.
+  Previously two identical unknown-outcome commands could stall the session
+  for up to ~50 seconds every eight tool calls.
+- Extend redaction with segment-exact credential variable names such as
+  `DB_PASS`, `ENCRYPTION_KEY`, `SIGNING_KEY`, and `GH_PAT`, without touching
+  benign names like `PATH`; add near-miss negative redaction tests.
+- Harden the shared-temp surfaces in both detectors: diagnostics files open
+  with `O_NOFOLLOW` where available and stop growing at 1 MiB; the state-cap
+  trim now keeps the 100 highest failure counters instead of discarding every
+  other command's backoff position; state writes retry once on a Windows
+  sharing violation.
+- Escape the `CODEX_HOME` path portion in rollout discovery so a `[` or `?`
+  in the home path no longer silently degrades packets to a single event.
+- Fix nested-fence parsing in `lesson_lint.py`: a ``` line inside a
+  four-backtick block no longer closes the block.
+- Add tests: end-to-end `codex_cli` backend coverage in the detector via a
+  stub runner (valid injection, invalid-output fallback, time cooldown),
+  dict-shaped `tool_response`, reason bounding, stale-directory sweep,
+  cross-file `command_signature` consistency, state-cap counter preservation,
+  state-file privacy regression, and nested-fence lint. Suite: 62 tests.
+- Split the `SKILL.md` Automatic Activation wall-of-text into scannable
+  detection and evidence rules; document the new bounds in
+  `references/semantic-review.md`, `references/hook-activation.md`, and
+  `SECURITY_NOTES.md`.
+
 ## 0.8.1 - 2026-07-24
 
 - Keep the two-call exact-repeat path fast, but stop treating every six unknown

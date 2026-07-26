@@ -17,12 +17,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 MAX_TRANSCRIPT_BYTES = 4 * 1024 * 1024
 MAX_EVENTS = 12
 MAX_TEXT = 600
+MAX_REASON_CHARS = 300
 MAX_REVIEW_TIMEOUT_SECONDS = 45
+STALE_REVIEW_DIR_SECONDS = 60 * 60
 CONFIG_FILE = "learning-retrospective-reviewer.json"
 CONFIG_PATH_ENV = "LEARNING_RETROSPECTIVE_REVIEW_CONFIG"
 CODEX_CLI_ENV = "LEARNING_RETROSPECTIVE_CODEX_CLI"
@@ -101,6 +104,17 @@ SECRET_SUBSTITUTIONS = (
         r"\1 <redacted>",
     ),
     (
+        # Segment-exact credential-ish variable names (DB_PASS, ENCRYPTION_KEY,
+        # GH_PAT, SIGNING_KEY, ...) that the substring pattern above misses.
+        # Segments avoid false positives such as PATH= or MONKEY=.
+        re.compile(
+            r"(?i)\b((?:[A-Za-z0-9]+_)*(?:pass|password|passwd|passphrase|"
+            r"pwd|secret|secrets|token|tokens|key|keys|pat|credential|"
+            r"credentials|auth)(?:_[A-Za-z0-9]+)*\s*[:=]\s*)[^\s,;]+"
+        ),
+        r"\1<redacted>",
+    ),
+    (
         re.compile(
             r"\b(?:sk-[A-Za-z0-9_-]{12,}|ghp_[A-Za-z0-9_-]{12,}|"
             r"github_pat_[A-Za-z0-9_-]{12,}|AKIA[A-Z0-9]{16}|"
@@ -175,12 +189,14 @@ def find_rollout(session_id):
     home = parent_codex_home / "sessions"
     if not home.is_dir():
         return None
-    pattern = str(
-        home
-        / "*"
-        / "*"
-        / "*"
-        / ("rollout-*" + glob.escape(session_id) + ".jsonl")
+    # Escape the home portion too: a "[" or "?" in the path (legal on
+    # Windows) would otherwise silently break rollout discovery.
+    pattern = os.path.join(
+        glob.escape(str(home)),
+        "*",
+        "*",
+        "*",
+        "rollout-*" + glob.escape(session_id) + ".jsonl",
     )
     matches = [Path(path) for path in glob.glob(pattern)]
     if not matches:
@@ -237,9 +253,30 @@ def command_signature(cwd, command):
     return hashlib.sha1(material.encode("utf-8", "replace")).hexdigest()[:12]
 
 
+def response_output_text(value):
+    """Best-effort text view of a tool_response for envelopes and excerpts."""
+    if isinstance(value, dict):
+        for key in ("output", "aggregated_output", "stdout", "stderr"):
+            text = value.get(key)
+            if isinstance(text, str) and text:
+                return text
+        return ""
+    return str(value or "")
+
+
 def extract_shell_outcome(value):
-    """Read only a Codex shell envelope, never arbitrary error keywords."""
-    lines = str(value or "").replace("\r\n", "\n").splitlines()[:4]
+    """Read a structured exit code or an anchored Codex shell envelope.
+
+    Never derives failure from arbitrary error keywords. Dict-shaped
+    tool_response payloads (Codex builds with structured exit status) are
+    read from their integer exit code field before any envelope parsing.
+    """
+    if isinstance(value, dict):
+        for key in ("exit_code", "exitCode"):
+            code = value.get(key)
+            if isinstance(code, int) and not isinstance(code, bool):
+                return ("succeeded" if code == 0 else "failed"), code
+    lines = response_output_text(value).replace("\r\n", "\n").splitlines()[:4]
     for line in lines:
         match = re.fullmatch(
             r"\s*(?:Exit code:|Process exited with code)\s*(-?\d+)\s*",
@@ -301,7 +338,9 @@ def extract_rollout_evidence(path):
                     ),
                     "outcome": outcome,
                     "exit_code": exit_code,
-                    "outcome_excerpt": redact(item.get("output")),
+                    "outcome_excerpt": redact(
+                        response_output_text(item.get("output"))
+                    ),
                 })
     return redact(latest_goal, 2000), events[-MAX_EVENTS:]
 
@@ -332,7 +371,9 @@ def build_review_packet(request):
         "command_signature": command_signature(current_cwd, command),
         "outcome": current_outcome,
         "exit_code": current_exit_code,
-        "outcome_excerpt": redact(payload.get("tool_response")),
+        "outcome_excerpt": redact(
+            response_output_text(payload.get("tool_response"))
+        ),
     }
     if not events or events[-1]["command_signature"] != current["command_signature"]:
         events.append(current)
@@ -515,6 +556,29 @@ def prepare_isolated_codex_home(directory):
     return isolated_home
 
 
+def sweep_stale_review_dirs(temp_parent):
+    """Remove per-call directories left behind by a crash or hard kill.
+
+    A killed runner never reaches TemporaryDirectory cleanup, so its copied
+    auth material would otherwise persist. Sweeping at the next start bounds
+    that residue to one hour without racing a live sibling review.
+    """
+    now = time.time()
+    try:
+        children = list(Path(temp_parent).glob("lr-review-*"))
+    except OSError:
+        return
+    for child in children:
+        try:
+            if (
+                child.is_dir()
+                and now - child.stat().st_mtime > STALE_REVIEW_DIR_SECONDS
+            ):
+                shutil.rmtree(child, ignore_errors=True)
+        except OSError:
+            continue
+
+
 def reviewer_temp_parent():
     """Keep temporary auth material inside the existing Codex trust boundary."""
     parent_home = Path(
@@ -522,6 +586,7 @@ def reviewer_temp_parent():
     )
     temp_parent = parent_home / "tmp" / "learning-retrospective-reviewer"
     temp_parent.mkdir(parents=True, exist_ok=True)
+    sweep_stale_review_dirs(temp_parent)
     return temp_parent
 
 
@@ -686,6 +751,9 @@ def run_reviewer(packet, config):
     )
     if error:
         raise RuntimeError(error)
+    # The reason text is untrusted reviewer-model output and can echo hostile
+    # packet content; flatten and bound it before it reaches the parent.
+    review["reason"] = " ".join(review["reason"].split())[:MAX_REASON_CHARS]
     review["reviewer_agent_id"] = thread_id
     review["reviewer_isolation"] = "enforced_no_tools"
     review["reviewer_context_isolation"] = "temporary_codex_home"

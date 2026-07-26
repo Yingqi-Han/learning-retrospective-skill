@@ -75,6 +75,28 @@ class LessonLintTests(unittest.TestCase):
         code, out = run_lint(["-"], stdin=body)
         self.assertEqual(code, 0, out)
 
+    def test_nested_fence_is_not_misparsed(self):
+        # A ``` line inside a ````-fenced example must not close the block:
+        # the closer has to be at least as long as the opener and bare.
+        nested_block = (
+            "````\n"
+            "```\n"
+            "inner example\n"
+            "```\n"
+            "````\n"
+        )
+        code, out = run_lint(["-"], stdin=GOOD_LESSON + "\n" + nested_block)
+        self.assertEqual(code, 0, out)
+
+        long_nested = (
+            "````\n"
+            + "\n".join(f"log line {i}" for i in range(60))
+            + "\n```\n````\n"
+        )
+        code, out = run_lint(["-"], stdin=GOOD_LESSON + "\n" + long_nested)
+        self.assertEqual(code, 1, out)
+        self.assertIn("raw log dump", out)
+
     def test_no_args_is_usage_error(self):
         code, _ = run_lint([])
         self.assertEqual(code, 2)

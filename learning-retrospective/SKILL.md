@@ -111,7 +111,30 @@ Before writing to user memory, repository docs, project rules, or another skill:
 
 ## Automatic Activation
 
-This skill is normally recalled through its description, which is weakest exactly when an agent is mid-loop. If your harness supports hooks or tool-event callbacks, wire a retry-candidate detector that injects a reminder to invoke this skill. Use structured failure status when the harness provides it. When it does not, never guess failure from error keywords; use exact repetition or a bounded activity window only to request a bounded secondary-agent review. A backend may treat a harness-generated, anchored shell exit envelope as structured packet evidence, but must not parse arbitrary command text for failure words. By default the hook must not launch a model process itself; it only asks the main agent or harness to perform the review. The shipped hooks attach a privacy-safe manifest generated from actual hook payloads; the main agent must copy the relevant raw tool-event fields into the review packet rather than replace them with a free-form summary. The reviewer detects failure-family similarity; a `known_loop` additionally requires a source-labelled prior lesson verified by the main agent. Codex users may explicitly opt into the user-context-isolated `codex_cli` backend described in `references/semantic-review.md`; it is never enabled by the public default. Runnable detector scripts live in `hooks/` (Claude Code and Codex variants) with an automated test suite in `tests/`; see `references/hook-activation.md` for registration, trust requirements, and the general pattern for other harnesses. Treat any hook config you write as an artifact under this skill's own rules: run the test suite, then trigger one real candidate to prove it fires, before trusting it.
+This skill is normally recalled through its description, which is weakest exactly when an agent is mid-loop. If your harness supports hooks or tool-event callbacks, wire a retry-candidate detector that injects a reminder to invoke this skill. Runnable detector scripts live in `hooks/` (Claude Code and Codex variants) with an automated test suite in `tests/`; see `references/hook-activation.md` for registration, trust requirements, and the general pattern for other harnesses.
+
+Detection rules:
+
+- Use structured failure status when the harness provides it. When it does
+  not, never guess failure from error keywords; use exact repetition or a
+  bounded activity window only to request a bounded secondary-agent review.
+- A backend may treat a harness-generated, anchored shell exit envelope as
+  structured packet evidence, but must not parse arbitrary command text for
+  failure words.
+- By default the hook must not launch a model process itself; it only asks
+  the main agent or harness to perform the review. Codex users may explicitly
+  opt into the user-context-isolated `codex_cli` backend described in
+  `references/semantic-review.md`; it is never enabled by the public default.
+
+Evidence rules:
+
+- The shipped hooks attach a privacy-safe manifest generated from actual hook
+  payloads; the main agent must copy the relevant raw tool-event fields into
+  the review packet rather than replace them with a free-form summary.
+- The reviewer detects failure-family similarity; a `known_loop` additionally
+  requires a source-labelled prior lesson verified by the main agent.
+
+Treat any hook config you write as an artifact under this skill's own rules: run the test suite, then trigger one real candidate to prove it fires, before trusting it.
 
 ## Examples
 

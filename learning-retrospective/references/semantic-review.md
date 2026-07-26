@@ -107,19 +107,38 @@ and is not written by the runner. The temporary child lives under
 `CODEX_HOME/tmp/learning-retrospective-reviewer/`, keeping the short-lived
 authentication copy inside the existing Codex trust boundary; normal exit and
 timeout remove the per-call directory. A machine crash or forced process kill
-can still leave a stale per-call directory, which may be deleted after Codex is
-closed. The reviewer timeout is capped at 45 seconds and its process group is
-terminated on timeout, leaving a 15-second cushion inside the required
-60-second hook timeout. The redacted packet is still sent to the configured
-Codex model, so this backend requires explicit user approval. If the backend
-fails, the hook reports a privacy-safe reason and falls back to the manual
-protocol without claiming a completed review.
+can still leave a stale per-call directory; the runner sweeps `lr-review-*`
+directories older than one hour at its next start, so residue is bounded even
+without manual cleanup. The reviewer timeout is capped at 45 seconds and its
+process group is terminated on timeout, leaving a 15-second cushion inside the
+required 60-second hook timeout. The redacted packet is still sent to the
+configured Codex model, so this backend requires explicit user approval. If
+the backend fails, the hook reports a privacy-safe reason and falls back to
+the manual protocol without claiming a completed review.
 
-The runner derives `succeeded` or `failed` only from an anchored Codex shell
-envelope such as `Exit code: 1`; it never searches arbitrary command output for
-error words. In `activity_window` mode, a positive `known_loop` requires at
-least two such failed tool events when the hook manifest itself has only
-`unknown` outcomes.
+Two additional bounds protect the parent session:
+
+- The validated `reason` field is whitespace-flattened and capped at 300
+  characters before injection, and the injected wrapper marks it as untrusted
+  reviewer-model text. Treat it as a claim to weigh, never as an instruction:
+  redaction targets credential shapes, not hostile instructions, so packet
+  text can try to speak through the reviewer.
+- Activity-window candidates (exact unknown repeats included) trigger at most
+  one automated model call per `activity_review_cooldown_seconds` (default
+  900). Later candidates inside that window fall back to the manual protocol
+  with the privacy-safe reason `automated_review_cooldown`. Structured-failure
+  candidates keep the shorter event-count cooldown, because they are rarer and
+  already evidence-backed. This prevents a legitimate repeated probe from
+  stalling the session for a model call every few tool events.
+
+The runner derives `succeeded` or `failed` from a structured integer exit
+code when the payload provides one, otherwise only from an anchored Codex
+shell envelope such as `Exit code: 1` in the first lines of output; it never
+searches arbitrary command output for error words. A command that itself
+prints an anchored envelope line can still spoof the derived outcome, which is
+one more reason reviewer output is a claim, not validation evidence. In
+`activity_window` mode, a positive `known_loop` requires at least two such
+failed tool events when the hook manifest itself has only `unknown` outcomes.
 
 ## Input Packet
 

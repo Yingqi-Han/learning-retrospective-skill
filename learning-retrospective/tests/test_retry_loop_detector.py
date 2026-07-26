@@ -10,6 +10,7 @@ so repeated runs do not pollute the temp directory.
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -35,7 +36,7 @@ def load_fixture(name):
 def run_hook(script, payload, bom=False, extra_env=None):
     session_id = payload.get("session_id")
     if session_id:
-        prefix = "codex" if script == CODEX else "claude"
+        prefix = "codex" if "codex" in Path(script).name else "claude"
         session_key = hashlib.sha1(
             str(session_id).encode("utf-8", "replace")
         ).hexdigest()[:12]
@@ -562,6 +563,176 @@ class CodexDetectorTest(unittest.TestCase):
         self.assertIn("Use any available fast, low-cost secondary agent", ctx)
         self.assertIn(">= 1.00", ctx)
         self.assertNotIn("ignore prior instructions", ctx)
+
+
+STUB_REVIEW_RUNNER_VALID = """\
+import json, sys
+request = json.loads(sys.stdin.buffer.read().decode("utf-8-sig"))
+manifest = request["manifest"]
+review = {
+    "schema_version": 1,
+    "request_id": manifest["request_id"],
+    "classification": "novel_exploration",
+    "confidence": 0.9,
+    "same_failure_family": True,
+    "prior_lesson_verified": False,
+    "evidence_adequate": True,
+    "should_interrupt": False,
+    "reviewer_agent_id": "stub-thread-1",
+    "reviewer_isolation": "enforced_no_tools",
+    "reviewer_context_isolation": "temporary_codex_home",
+    "reason": "stub reason " + "x" * 1000 + "\\nsecond line",
+    "recommended_action": "continue",
+}
+sys.stdout.write(json.dumps({"ok": True, "review": review}))
+"""
+
+STUB_REVIEW_RUNNER_GARBAGE = 'import sys; sys.stdout.write("not json")\n'
+
+
+def codex_command_key(cwd, command):
+    value = str(cwd or "").strip()
+    normalized = os.path.normcase(os.path.normpath(value)) if value else ""
+    material = normalized + "\n" + str(command or "").strip()
+    return hashlib.sha1(material.encode("utf-8", "replace")).hexdigest()[:12]
+
+
+def extract_automated_review(out):
+    ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    start = "AUTOMATED_SEMANTIC_REVIEW_RESULT_BEGIN\n"
+    end = "\nAUTOMATED_SEMANTIC_REVIEW_RESULT_END"
+    return json.loads(ctx.split(start, 1)[1].split(end, 1)[0])
+
+
+class CodexCliBackendTest(unittest.TestCase):
+    """End-to-end detector coverage for the opt-in codex_cli backend,
+    using a stub runner script placed next to a detector copy."""
+
+    def _harness(self, temp_dir, stub_source):
+        temp_dir = Path(temp_dir)
+        detector = temp_dir / CODEX.name
+        shutil.copy2(CODEX, detector)
+        (temp_dir / "retry-reviewer-codex-cli.py").write_text(
+            stub_source, encoding="utf-8"
+        )
+        config_path = temp_dir / "reviewer.json"
+        config_path.write_text(json.dumps({
+            "review_backend": "codex_cli",
+        }), encoding="utf-8")
+        return detector, {"LEARNING_RETROSPECTIVE_REVIEW_CONFIG": str(config_path)}
+
+    def test_valid_stub_review_is_injected_with_bounded_reason(self):
+        fail = fresh_session(load_fixture("codex-post-tool-use-fail.json"))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            detector, env = self._harness(temp_dir, STUB_REVIEW_RUNNER_VALID)
+            outputs = []
+            for index in range(3):
+                event = dict(fail)
+                event["tool_input"] = {"command": f"distinct failing command {index}"}
+                code, out = run_hook(detector, event, extra_env=env)
+                self.assertEqual(code, 0)
+                outputs.append(out)
+
+        self.assertEqual(outputs[:2], ["", ""])
+        parsed = json.loads(outputs[2])
+        self.assertIn(
+            "automated semantic review completed", parsed["systemMessage"]
+        )
+        ctx = parsed["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("untrusted reviewer-model text", ctx)
+        self.assertNotIn("Semantic retry candidate", ctx)
+        review = extract_automated_review(outputs[2])
+        self.assertEqual(review["reviewer_agent_id"], "stub-thread-1")
+        self.assertLessEqual(len(review["reason"]), 300)
+        self.assertNotIn("\n", review["reason"])
+
+    def test_invalid_stub_output_falls_back_to_manual_protocol(self):
+        fail = fresh_session(load_fixture("codex-post-tool-use-fail.json"))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            detector, env = self._harness(temp_dir, STUB_REVIEW_RUNNER_GARBAGE)
+            out = ""
+            for index in range(3):
+                event = dict(fail)
+                event["tool_input"] = {"command": f"distinct failing command {index}"}
+                _, out = run_hook(detector, event, extra_env=env)
+
+        assert_semantic_review(self, out)
+        ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("review_runner_invalid_output", ctx)
+        self.assertIn("Do not fabricate a reviewer result", ctx)
+
+    def test_activity_candidates_respect_model_call_time_cooldown(self):
+        missing = fresh_session(
+            load_fixture("codex-post-tool-use-missing-exit-code.json")
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            detector, env = self._harness(temp_dir, STUB_REVIEW_RUNNER_VALID)
+            outputs = []
+            for _ in range(10):
+                code, out = run_hook(detector, dict(missing), extra_env=env)
+                self.assertEqual(code, 0)
+                outputs.append(out)
+
+        self.assertEqual(outputs[0], "")
+        self.assertIn(
+            "automated semantic review completed",
+            json.loads(outputs[1])["systemMessage"],
+            "the first exact-repeat candidate should spend the one model call",
+        )
+        self.assertEqual(outputs[2:9], [""] * 7)
+        cooldown_ctx = json.loads(
+            outputs[9]
+        )["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("automated_review_cooldown", cooldown_ctx)
+        self.assertIn("Semantic retry candidate", cooldown_ctx)
+        self.assertNotIn("AUTOMATED_SEMANTIC_REVIEW_RESULT_BEGIN", cooldown_ctx)
+
+
+class StatePrivacyAndCapTest(unittest.TestCase):
+    def test_state_cap_keeps_high_failure_counters(self):
+        fail = fresh_session(load_fixture("codex-post-tool-use-fail.json"))
+        fail["cwd"] = "C:\\proj"
+        session_key = hashlib.sha1(
+            fail["session_id"].encode("utf-8", "replace")
+        ).hexdigest()[:12]
+        state_path = (
+            Path(tempfile.gettempdir()) / f"codex-retry-loop-{session_key}.json"
+        )
+        hot_command = "hot failing command"
+        hot_key = codex_command_key(fail["cwd"], hot_command)
+        state = {f"dummy{i:03d}": 1 for i in range(205)}
+        state[hot_key] = 7
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+
+        other = dict(fail)
+        other["tool_input"] = {"command": "other failing command"}
+        code, _ = run_hook(CODEX, other)
+        self.assertEqual(code, 0)
+
+        hot = dict(fail)
+        hot["tool_input"] = {"command": hot_command}
+        code, out = run_hook(CODEX, hot)
+        self.assertEqual(code, 0)
+        assert_reminder(self, out, 8)
+
+    def test_state_file_contains_no_raw_commands(self):
+        fail = fresh_session(load_fixture("codex-post-tool-use-fail.json"))
+        sentinel = "privacy-sentinel-command-xyzzy"
+        fail["tool_input"] = {"command": sentinel}
+        run_hook(CODEX, fail)
+        _, out = run_hook(CODEX, fail)
+        assert_reminder(self, out)
+        session_key = hashlib.sha1(
+            fail["session_id"].encode("utf-8", "replace")
+        ).hexdigest()[:12]
+        state_path = (
+            Path(tempfile.gettempdir()) / f"codex-retry-loop-{session_key}.json"
+        )
+        self.assertNotIn(
+            sentinel,
+            state_path.read_text(encoding="utf-8"),
+            "rolling state must store command hashes, never raw commands",
+        )
 
 
 if __name__ == "__main__":
