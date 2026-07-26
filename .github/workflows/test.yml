@@ -54,6 +54,6 @@ jobs:
           USERPROFILE: ${{ runner.temp }}/lr-home
         run: |
           python install.py --agent codex --with-hooks --skip-tests
-          python -c "from pathlib import Path; h=Path.home()/'.codex'/'hooks'; assert (h/'retry-loop-detector-codex.py').is_file(); assert (h/'retry-reviewer-codex-cli.py').is_file(); assert (h/'learning-retrospective-reviewer.json').is_file()"
+          python -c "from pathlib import Path; v=(Path('learning-retrospective')/'VERSION').read_text().strip(); h=Path.home()/'.codex'/'hooks'; assert (h/f'retry-loop-detector-codex-{v}.py').is_file(); assert (h/f'retry-reviewer-codex-cli-{v}.py').is_file(); assert (h/'learning-retrospective-reviewer.json').is_file()"
           python -c "import subprocess,sys; out=subprocess.check_output([sys.executable,'install.py','--agent','codex','--print-hook-config'],text=True); assert '\"timeout\": 60' in out"
           python install.py --agent codex --uninstall

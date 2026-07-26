@@ -497,6 +497,24 @@ def build_review_packet(request):
     )
     manifest_matches = aligned and current_matched and alignment_visible
     packet_events = events[packet_start:]
+    aligned_events = []
+    if manifest_matches:
+        for expected, index in zip(expected_signatures, matched_indexes):
+            event = dict(events[index])
+            event["manifest_command_signature"] = expected
+            aligned_events.append(event)
+    prior_aligned_events = aligned_events[:-1]
+    prior_failed_event_count = sum(
+        item.get("outcome") == "failed" for item in prior_aligned_events
+    )
+    current_manifest_signature = (
+        expected_signatures[-1] if expected_signatures else ""
+    )
+    prior_same_signature_failed_count = sum(
+        item.get("outcome") == "failed"
+        and item.get("manifest_command_signature") == current_manifest_signature
+        for item in prior_aligned_events
+    )
     for item in packet_events:
         item.pop("signature_candidates", None)
         item.pop("tool_use_id", None)
@@ -516,7 +534,33 @@ def build_review_packet(request):
         "manifest_alignment_mode": "ordered_subsequence",
         "manifest_event_skip_count": skipped_events,
         "manifest_current_event_matched": current_matched,
+        "manifest_prior_failed_event_count": prior_failed_event_count,
+        "manifest_prior_same_signature_failed_count": (
+            prior_same_signature_failed_count
+        ),
     }
+
+
+def review_preflight(packet):
+    """Reject model calls that cannot possibly establish repeated failure."""
+    if not packet.get("parent_rollout_found"):
+        return "parent_rollout_missing"
+    if not packet.get("manifest_matches_event_sequence"):
+        return "manifest_alignment_failed"
+    if not packet.get("manifest_current_event_matched"):
+        return "manifest_current_event_unmatched"
+
+    manifest = packet.get("hook_manifest")
+    reason = manifest.get("candidate_reason") if isinstance(manifest, dict) else ""
+    if reason == "exact_attempt_repeat":
+        if packet.get("manifest_prior_same_signature_failed_count", 0) < 2:
+            return "insufficient_prior_same_signature_failures"
+        return ""
+    if reason == "sustained_attempt_activity":
+        if packet.get("manifest_prior_failed_event_count", 0) < 2:
+            return "insufficient_prior_failures"
+        return ""
+    return "unsupported_candidate_reason"
 
 
 def output_schema():
@@ -879,6 +923,31 @@ def main():
     try:
         request = json.loads(sys.stdin.buffer.read().decode("utf-8-sig"))
         packet = build_review_packet(request)
+        skip_reason = review_preflight(packet)
+        if skip_reason:
+            sys.stdout.write(json.dumps({
+                "ok": True,
+                "skipped": True,
+                "skip_reason": skip_reason,
+                "packet_event_count": len(packet["tool_events"]),
+                "parent_rollout_found": packet["parent_rollout_found"],
+                "manifest_matches_event_sequence": packet[
+                    "manifest_matches_event_sequence"
+                ],
+                "manifest_event_skip_count": packet[
+                    "manifest_event_skip_count"
+                ],
+                "manifest_current_event_matched": packet[
+                    "manifest_current_event_matched"
+                ],
+                "manifest_prior_failed_event_count": packet[
+                    "manifest_prior_failed_event_count"
+                ],
+                "manifest_prior_same_signature_failed_count": packet[
+                    "manifest_prior_same_signature_failed_count"
+                ],
+            }, sort_keys=True))
+            return 0
         review = run_reviewer(packet, read_json_config())
         sys.stdout.write(json.dumps({
             "ok": True,

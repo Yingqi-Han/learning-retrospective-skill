@@ -19,6 +19,7 @@ import sys
 import tempfile
 import time
 import traceback
+from contextlib import contextmanager
 
 SEMANTIC_WINDOW_SIZE = 12
 SEMANTIC_COOLDOWN_CALLS = 8
@@ -27,7 +28,9 @@ ACTIVITY_REVIEW_DISTINCT_COMMANDS = 3
 ACTIVITY_REVIEW_MIN_SPAN_SECONDS = 120
 ACTIVITY_REVIEW_COOLDOWN_CALLS = 24
 ACTIVITY_REVIEW_COOLDOWN_SECONDS = 15 * 60
-ATTEMPT_REPEAT_THRESHOLD = 2
+ATTEMPT_WINDOW_MAX_AGE_SECONDS = 10 * 60
+ATTEMPT_REPEAT_THRESHOLD = 3
+STATE_LOCK_TIMEOUT_SECONDS = 2.0
 STATE_PREFIX = "codex-retry-attempt-"
 LEGACY_STATE_PREFIX = "codex-retry-loop-"
 STATE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
@@ -145,12 +148,89 @@ def cleanup_stale_state(temp_dir):
             ):
                 os.remove(path)
                 continue
+            if name.startswith(STATE_PREFIX) and name.endswith(".lock"):
+                if now - os.path.getmtime(path) > STATE_MAX_AGE_SECONDS:
+                    os.remove(path)
+                continue
             if not (name.startswith(STATE_PREFIX) and name.endswith(".json")):
                 continue
             if now - os.path.getmtime(path) > STATE_MAX_AGE_SECONDS:
                 os.remove(path)
     except Exception:
         pass
+
+
+@contextmanager
+def state_file_lock(lock_path, timeout=STATE_LOCK_TIMEOUT_SECONDS):
+    """Serialize one session's state transaction across hook processes."""
+    handle = open(lock_path, "a+b")
+    if os.path.getsize(lock_path) == 0:
+        handle.write(b"\0")
+        handle.flush()
+    deadline = time.monotonic() + timeout
+    acquired = False
+    try:
+        while not acquired:
+            try:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+            except (OSError, IOError):
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("state_lock_timeout")
+                time.sleep(0.01)
+        os.utime(lock_path, None)
+        yield
+    finally:
+        if acquired:
+            try:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
+        handle.close()
+
+
+def load_state(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            value = json.load(handle)
+    except Exception:
+        value = {}
+    return value if isinstance(value, dict) else {}
+
+
+def write_state(path, state):
+    pending_path = f"{path}.{os.getpid()}.tmp"
+    try:
+        with open(pending_path, "w", encoding="utf-8") as handle:
+            json.dump(state, handle)
+        try:
+            os.replace(pending_path, path)
+        except OSError:
+            # Antivirus and indexing processes can briefly hold a replaced file
+            # on Windows even while our per-session lock is held.
+            time.sleep(0.05)
+            os.replace(pending_path, path)
+    finally:
+        try:
+            os.remove(pending_path)
+        except Exception:
+            pass
 
 
 def normalize_cwd(cwd):
@@ -181,6 +261,10 @@ def update_attempt_window(state, key, config=None):
         "activity_review_cooldown_seconds",
         ACTIVITY_REVIEW_COOLDOWN_SECONDS,
     )
+    attempt_window_max_age = config.get(
+        "attempt_window_max_age_seconds",
+        ATTEMPT_WINDOW_MAX_AGE_SECONDS,
+    )
     now = int(time.time())
     event_index = state.get("__event_index__", 0)
     if not isinstance(event_index, int) or isinstance(event_index, bool):
@@ -201,6 +285,8 @@ def update_attempt_window(state, key, config=None):
             or observed_at > now
         ):
             observed_at = now
+        if now - observed_at > attempt_window_max_age:
+            continue
         sanitized.append({
             "event_index": item.get("event_index"),
             "key": item["key"],
@@ -362,6 +448,17 @@ def load_reviewer_config():
     activity_review_cooldown_seconds = min(
         24 * 60 * 60, max(0, activity_review_cooldown_seconds)
     )
+    attempt_window_max_age_seconds = config.get(
+        "attempt_window_max_age_seconds",
+        ATTEMPT_WINDOW_MAX_AGE_SECONDS,
+    )
+    if not isinstance(attempt_window_max_age_seconds, int) or isinstance(
+        attempt_window_max_age_seconds, bool
+    ):
+        attempt_window_max_age_seconds = ATTEMPT_WINDOW_MAX_AGE_SECONDS
+    attempt_window_max_age_seconds = min(
+        24 * 60 * 60, max(60, attempt_window_max_age_seconds)
+    )
     return {
         "preferred_model": model,
         "reasoning_effort": effort,
@@ -373,6 +470,7 @@ def load_reviewer_config():
         "activity_review_min_span_seconds": activity_review_min_span_seconds,
         "activity_review_cooldown_calls": activity_review_cooldown_calls,
         "activity_review_cooldown_seconds": activity_review_cooldown_seconds,
+        "attempt_window_max_age_seconds": attempt_window_max_age_seconds,
     }
 
 
@@ -431,15 +529,33 @@ def automated_review_violation(review):
     return ""
 
 
+def review_runner_path():
+    """Select the reviewer paired with this detector release.
+
+    Repository copies retain the unversioned source name. Installed hook
+    bundles use immutable, versioned names so changing executable bytes also
+    changes the Codex hook identity and requires a fresh trust decision.
+    """
+    directory = os.path.dirname(os.path.abspath(__file__))
+    name = os.path.basename(__file__)
+    match = re.fullmatch(r"retry-loop-detector-codex-(.+)\.py", name)
+    runner_name = (
+        f"retry-reviewer-codex-cli-{match.group(1)}.py"
+        if match
+        else REVIEW_RUNNER_FILE
+    )
+    return os.path.join(directory, runner_name)
+
+
 def run_automated_review(manifest, hook_payload, config=None):
     """Run the explicitly configured Codex CLI backend, if enabled."""
     if config is None:
         config = load_reviewer_config()
     if config["review_backend"] != "codex_cli":
-        return None, ""
-    runner = os.path.join(os.path.dirname(os.path.abspath(__file__)), REVIEW_RUNNER_FILE)
+        return None, "", ""
+    runner = review_runner_path()
     if not os.path.isfile(runner):
-        return None, "review_runner_missing"
+        return None, "review_runner_missing", ""
     request = {
         "manifest": manifest,
         "hook_payload": {
@@ -470,29 +586,36 @@ def run_automated_review(manifest, hook_payload, config=None):
         )
         result = json.loads(completed.stdout)
     except subprocess.TimeoutExpired:
-        return None, "review_runner_timeout"
+        return None, "review_runner_timeout", ""
     except Exception:
-        return None, "review_runner_invalid_output"
+        return None, "review_runner_invalid_output", ""
     if completed.returncode != 0 or not isinstance(result, dict):
-        return None, "review_runner_failed"
+        return None, "review_runner_failed", ""
     if result.get("ok") is not True:
         reason = result.get("error")
         if not isinstance(reason, str) or not re.fullmatch(
             r"[A-Za-z0-9_-]{1,100}", reason
         ):
             reason = "review_runner_failed"
-        return None, reason
+        return None, reason, ""
+    if result.get("skipped") is True:
+        reason = result.get("skip_reason")
+        if not isinstance(reason, str) or not re.fullmatch(
+            r"[A-Za-z0-9_-]{1,100}", reason
+        ):
+            reason = "review_preflight_rejected"
+        return None, "", reason
     review = result.get("review")
     if not isinstance(review, dict):
-        return None, "review_result_missing"
+        return None, "review_result_missing", ""
     if review.get("request_id") != manifest["request_id"]:
-        return None, "review_request_id_mismatch"
+        return None, "review_request_id_mismatch", ""
     reviewer_id = review.get("reviewer_agent_id")
     if not isinstance(reviewer_id, str) or not reviewer_id:
-        return None, "reviewer_agent_id_missing"
+        return None, "reviewer_agent_id_missing", ""
     violation = automated_review_violation(review)
     if violation:
-        return None, violation
+        return None, violation, ""
     # Defense in depth: the runner already bounds the reason, but never let
     # unbounded or multi-line reviewer text into the injected context.
     reason_text = review.get("reason")
@@ -500,7 +623,7 @@ def run_automated_review(manifest, hook_payload, config=None):
         review["reason"] = " ".join(
             reason_text.split()
         )[:MAX_REVIEWER_REASON_CHARS]
-    return review, ""
+    return review, "", ""
 
 
 def automated_review_context(review):
@@ -727,56 +850,43 @@ key = command_signature(cwd, command)
 temp_dir = tempfile.gettempdir()
 cleanup_stale_state(temp_dir)
 state_path = os.path.join(temp_dir, f"{STATE_PREFIX}{session_key}.json")
-
-try:
-    with open(state_path, encoding="utf-8") as f:
-        state = json.load(f)
-except Exception:
-    state = {}
-if not isinstance(state, dict):
-    state = {}
-
-_diagnostic_phase = "update_state"
 review_config = load_reviewer_config()
-semantic_signal = update_attempt_window(state, key, review_config)
+lock_path = state_path + ".lock"
 
-# Gate automated model calls by wall-clock time as well as event count:
-# attempt candidates may otherwise stall the session and spend a paid model
-# call every few tool events.
-_diagnostic_phase = "gate_automated_review"
-now_ts = int(time.time())
-last_automated = state.get("__automated_review_time__", 0)
-if (
-    not isinstance(last_automated, int)
-    or isinstance(last_automated, bool)
-    or last_automated > now_ts
-):
-    last_automated = 0
-automated_review_allowed = bool(
-    semantic_signal["candidate"]
-    and review_config["review_backend"] == "codex_cli"
-    and now_ts - last_automated
-    >= review_config["activity_review_cooldown_seconds"]
-)
-if automated_review_allowed:
-    state["__automated_review_time__"] = now_ts
+# Read, update, reserve a possible model call, and write under one per-session
+# transaction. The slow reviewer process always runs after the lock is released.
+_diagnostic_phase = "update_state"
+with state_file_lock(lock_path):
+    state = load_state(state_path)
+    semantic_signal = update_attempt_window(state, key, review_config)
 
-_diagnostic_phase = "write_state"
-try:
-    pending_path = f"{state_path}.{os.getpid()}.tmp"
-    with open(pending_path, "w", encoding="utf-8") as f:
-        json.dump(state, f)
-    try:
-        os.replace(pending_path, state_path)
-    except OSError:
-        # A concurrent hook instance may briefly hold the file on Windows.
-        time.sleep(0.05)
-        os.replace(pending_path, state_path)
-except Exception:
-    try:
-        os.remove(pending_path)
-    except Exception:
-        pass
+    # Gate automated model calls by wall-clock time as well as event count.
+    # Reserving inside the same transaction prevents concurrent candidates from
+    # launching duplicate reviewers.
+    _diagnostic_phase = "gate_automated_review"
+    now_ts = int(time.time())
+    last_automated = state.get("__automated_review_time__", 0)
+    if (
+        not isinstance(last_automated, int)
+        or isinstance(last_automated, bool)
+        or last_automated > now_ts
+    ):
+        last_automated = 0
+    automated_review_allowed = bool(
+        semantic_signal["candidate"]
+        and review_config["review_backend"] == "codex_cli"
+        and now_ts - last_automated
+        >= review_config["activity_review_cooldown_seconds"]
+    )
+    automated_review_reservation = ""
+    if automated_review_allowed:
+        automated_review_reservation = (
+            f"{now_ts}:{os.getpid()}:{semantic_signal['event_index']}"
+        )
+        state["__automated_review_time__"] = now_ts
+        state["__automated_review_token__"] = automated_review_reservation
+    _diagnostic_phase = "write_state"
+    write_state(state_path, state)
 
 _diagnostic_phase = "emit_reminder"
 semantic_candidate = semantic_signal["candidate"]
@@ -787,16 +897,34 @@ semantic_manifest = (
 )
 automated_review = None
 automated_review_error = ""
+automated_review_skip = ""
 if semantic_candidate:
     if automated_review_allowed:
-        automated_review, automated_review_error = run_automated_review(
+        automated_review, automated_review_error, automated_review_skip = run_automated_review(
             semantic_manifest, data, review_config
         )
+        # A cheap evidence rejection did not spend a model call. Release its
+        # cooldown reservation so a later, genuinely failed candidate can be
+        # checked immediately. Keep the timestamp after a model call or runner
+        # error to bound latency and repeated failures.
+        with state_file_lock(lock_path):
+            latest_state = load_state(state_path)
+            if latest_state.get("__automated_review_token__") == (
+                automated_review_reservation
+            ):
+                latest_state.pop("__automated_review_token__", None)
+                if automated_review_skip:
+                    latest_state.pop("__automated_review_time__", None)
+                write_state(state_path, latest_state)
     elif review_config["review_backend"] == "codex_cli":
         automated_review_error = "automated_review_cooldown"
 if semantic_candidate:
     append_diagnostic(
-        "semantic_review_requested",
+        (
+            "semantic_candidate_detected"
+            if automated_review_skip
+            else "semantic_review_requested"
+        ),
         evidence_mode=semantic_signal["evidence_mode"],
         candidate_reason=semantic_signal["candidate_reason"],
         attempt_count=semantic_signal["repeat_count"],
@@ -820,7 +948,19 @@ if semantic_candidate:
             request_id=semantic_manifest["request_id"],
             reason=automated_review_error,
         )
+    elif automated_review_skip:
+        append_diagnostic(
+            "automated_review_skipped",
+            request_id=semantic_manifest["request_id"],
+            reason=automated_review_skip,
+        )
 if semantic_candidate:
+    # A direct-review preflight rejection means the rollout proves there are
+    # not enough prior failed outcomes. Stay silent instead of falling back to
+    # an expensive or distracting manual semantic-review request.
+    if automated_review_skip:
+        _diagnostic_phase = "complete"
+        sys.exit(0)
     contexts = []
     system_messages = []
     if automated_review:

@@ -23,6 +23,10 @@ class HookInstallerTest(unittest.TestCase):
         output = stream.getvalue()
         self.assertIn('"PreToolUse"', output)
         self.assertNotIn('"PostToolUse"', output)
+        self.assertIn(
+            INSTALLER.installed_hook_script("codex"),
+            output,
+        )
 
     def test_hook_install_preserves_active_config_and_updates_bundle(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -44,6 +48,35 @@ class HookInstallerTest(unittest.TestCase):
             for target in result["targets"]:
                 self.assertTrue(target.is_file())
             self.assertNotIn(active, result["targets"])
+            self.assertEqual(
+                result["detector"].name,
+                INSTALLER.installed_hook_script("codex"),
+            )
+            self.assertEqual(
+                [path.name for path in result["support_files"]],
+                INSTALLER.installed_hook_support_files("codex"),
+            )
+
+    def test_modified_same_version_executable_is_not_overwritten(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            hook_dir = root / "hooks"
+            hook_dir.mkdir()
+            detector = (
+                hook_dir / INSTALLER.installed_hook_script("codex")
+            )
+            detector.write_text("local modification", encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                RuntimeError, "immutable versioned hook conflict"
+            ):
+                INSTALLER.install_hook_files(
+                    "codex", hook_dir, root / "backups", "test-conflict"
+                )
+            self.assertEqual(
+                detector.read_text(encoding="utf-8"),
+                "local modification",
+            )
 
     def test_claude_config_omits_keys_that_detector_cannot_honor(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -96,10 +129,8 @@ class HookInstallerTest(unittest.TestCase):
             backup_root = root / "backups"
             hook_dir.mkdir()
             target_names = [
-                *INSTALLER.HOOK_SUPPORT_FILES["codex"],
                 INSTALLER.INSTALLED_REVIEW_CONFIG_EXAMPLE,
                 INSTALLER.ACTIVE_REVIEW_CONFIG,
-                INSTALLER.HOOK_SCRIPTS["codex"],
             ]
             before = {}
             for name in target_names:
@@ -131,6 +162,11 @@ class HookInstallerTest(unittest.TestCase):
                     (hook_dir / name).read_text(encoding="utf-8"),
                     content,
                 )
+            self.assertFalse(
+                (hook_dir / INSTALLER.installed_hook_script("codex")).exists()
+            )
+            for name in INSTALLER.installed_hook_support_files("codex"):
+                self.assertFalse((hook_dir / name).exists())
 
 
 if __name__ == "__main__":

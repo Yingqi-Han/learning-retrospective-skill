@@ -19,15 +19,19 @@ Calibrate the reminder to the skill's two modes: it must not suppress legitimate
 
 Claude Code uses structured failure events. Codex records attempts before
 execution because its current `PostToolUse` path is success-only. The Codex
-detector requests review when a signature appears twice in the latest 12
-attempts, including non-consecutive repetition. A broad attempt review requires
+detector requests review when a signature appears three times in the latest 12
+attempts within 10 minutes, including non-consecutive repetition. A broad attempt review requires
 12 calls containing at least three command hashes over at least 120 seconds. It
 then waits at least 24 additional calls and 15 minutes before another broad
-review; exact repetitions retain the shorter eight-call candidate cooldown. With
-the opt-in `codex_cli` backend, an attempt-window candidate spends at most one
-automated model call per `activity_review_cooldown_seconds` (default 900);
-later candidates inside that window fall back to the manual protocol with the
-reason `automated_review_cooldown`. Commands and outputs are not stored in
+review; exact repetitions retain the shorter eight-call candidate cooldown.
+With the opt-in `codex_cli` backend, a deterministic preflight first aligns the
+manifest to the parent rollout. It starts a model only when at least two prior
+events failed; exact repetition additionally requires both failures to match
+the current signature. A rejected preflight stays silent and releases its
+cooldown reservation. A real model call spends at most one automated call per
+`activity_review_cooldown_seconds` (default 900); later candidates inside that
+window fall back to the manual protocol with the reason
+`automated_review_cooldown`. Commands and outputs are not stored in
 rolling state; only event indexes, command hashes, and timestamps are retained.
 When review is requested, the hook injects a `HOOK_EVIDENCE_MANIFEST` generated
 from actual `PreToolUse` observations. The reviewer obtains prior outcomes from
@@ -71,7 +75,8 @@ set a locally available model:
   "confidence_threshold": 0.8,
   "review_backend": "main_agent",
   "codex_cli_path": "",
-  "review_timeout_seconds": 45
+  "review_timeout_seconds": 45,
+  "attempt_window_max_age_seconds": 600
 }
 ```
 
@@ -80,7 +85,7 @@ Do not commit a machine-specific model choice to a shared repository. An empty
 `main_agent` is the safe public default and never starts a model process.
 
 Codex users may explicitly set `review_backend` to `codex_cli`. The installer
-copies `retry-reviewer-codex-cli.py` beside the detector. This backend reads a
+copies a same-version reviewer beside the versioned detector. This backend reads a
 bounded parent-rollout tail, redacts common credential shapes, runs one real
 Codex child in a temporary user-context-isolated home, disables tool-bearing
 features before the model call, enforces a read-only sandbox, rejects any
@@ -100,7 +105,11 @@ Two verified facts shaped the design:
 - `PostToolUse` fires only on **successful** tool calls; failures fire `PostToolUseFailure`. A single-event heuristic that parses `tool_response` for error strings never sees real failures. Register the same script on **both** events: failure increments the counter, success resets it - no fragile output parsing needed.
 - On Windows, hook commands may run through Git Bash, whose PATH can lack `python` even when PowerShell finds it. Use the exec form (`command` + `args`, no shell) with the interpreter's full path. Prefer `python -S` for this stdlib-only detector to avoid site-package startup overhead.
 
-The runnable script is `../hooks/retry-loop-detector-claude.py` (stdlib-only, covered by the complete unittest suite). Copy it to `~/.claude/hooks/` and review it before registering — see `../SECURITY_NOTES.md`.
+The repository source is `../hooks/retry-loop-detector-claude.py`
+(stdlib-only, covered by the complete unittest suite). Prefer
+`install.py --agent claude --with-hooks`, which copies it under an immutable
+versioned name and prints the exact registration path. Review it before
+registering - see `../SECURITY_NOTES.md`.
 
 Register it in `~/.claude/settings.json` (exec form; substitute your interpreter path):
 
@@ -114,7 +123,7 @@ Register it in `~/.claude/settings.json` (exec form; substitute your interpreter
           {
             "type": "command",
             "command": "C:\\path\\to\\python.exe",
-            "args": ["-S", "C:\\Users\\<user>\\.claude\\hooks\\retry-loop-detector-claude.py"],
+            "args": ["-S", "C:\\Users\\<user>\\.claude\\hooks\\retry-loop-detector-claude-<version>.py"],
             "timeout": 5
           }
         ]
@@ -127,7 +136,7 @@ Register it in `~/.claude/settings.json` (exec form; substitute your interpreter
           {
             "type": "command",
             "command": "C:\\path\\to\\python.exe",
-            "args": ["-S", "C:\\Users\\<user>\\.claude\\hooks\\retry-loop-detector-claude.py"],
+            "args": ["-S", "C:\\Users\\<user>\\.claude\\hooks\\retry-loop-detector-claude-<version>.py"],
             "timeout": 5
           }
         ]
@@ -142,7 +151,9 @@ Verification procedure (do this once before trusting it):
 1. Run the automated suite: `python -S -m unittest discover -s learning-retrospective/tests -v` (covers fail/fail/reset sequences, backoff, missing session ids, BOM input, non-Bash tools, and garbage input).
 2. Run one harmless failing command twice in a live Claude Code session and
    confirm the reminder appears. For Codex, repeat one harmless failing command
-   twice and confirm `PreToolUse` requests review before the second execution.
+   three times and confirm `PreToolUse` requests review before the third
+   execution. With `codex_cli`, also run a successful repeated probe and confirm
+   it stays silent after the deterministic outcome preflight.
 
 Notes:
 
@@ -166,7 +177,7 @@ and the Codex source:
   eventual successes and failures. It records attempts, not outcomes; the
   reviewer reads prior outcomes from the parent rollout.
 - The handler `command` is a single string (no exec-form `args` array). On Windows, a quoted executable path at the start of a PowerShell command needs the `&` call operator; without it the hook exits with code 1 before Python starts. Use `commandWindows` for that override and full interpreter paths for the same PATH reasons as on Claude Code.
-- Non-managed hooks do not run until the user reviews and trusts the current definition hash. Installing the files is not enough. CLI/TUI releases may expose `/hooks`; Codex Desktop uses a Hooks settings panel, and some releases show only an enable/disable switch. Enablement and trust are separate, so the switch alone does not prove that the hook is runnable.
+- Non-managed hooks do not run until the user reviews and trusts the current definition hash. Installing the files is not enough. CLI/TUI releases may expose `/hooks`; Codex Desktop uses a Hooks settings panel, and some releases show only an enable/disable switch. Enablement and trust are separate, so the switch alone does not prove that the hook is runnable. Current Codex source builds this identity from normalized hook configuration rather than hashing the script bytes. Use the installer's versioned executable path so an upgrade changes the command definition and prompts for a fresh trust decision.
 
 `~/.codex/hooks.json`:
 
@@ -179,8 +190,8 @@ and the Codex source:
         "hooks": [
           {
             "type": "command",
-            "command": "\"C:/path/to/python.exe\" -S \"C:/Users/<user>/.codex/hooks/retry-loop-detector-codex.py\"",
-            "commandWindows": "& \"C:/path/to/python.exe\" -S \"C:/Users/<user>/.codex/hooks/retry-loop-detector-codex.py\"",
+            "command": "\"C:/path/to/python.exe\" -S \"C:/Users/<user>/.codex/hooks/retry-loop-detector-codex-<version>.py\"",
+            "commandWindows": "& \"C:/path/to/python.exe\" -S \"C:/Users/<user>/.codex/hooks/retry-loop-detector-codex-<version>.py\"",
             "timeout": 60
           }
         ]
@@ -190,17 +201,22 @@ and the Codex source:
 }
 ```
 
-The runnable detector is `../hooks/retry-loop-detector-codex.py`; the optional
-isolated backend is `../hooks/retry-reviewer-codex-cli.py`. The detector
+The repository sources are `../hooks/retry-loop-detector-codex.py` and
+`../hooks/retry-reviewer-codex-cli.py`. `install.py --with-hooks` copies them
+under matching versioned names and prints the exact registration path. The detector
 requires a session id, expires state older than seven days, and never stores raw
-commands or output. A repeated attempt requests review before execution; broad
+commands or output. Attempt evidence expires after 10 minutes by default, and
+state transactions are serialized across concurrent processes. A repeated
+attempt requests review before execution; broad
 activity uses the slower 12-call/120-second gate and 24-call/15-minute cooldown
 without claiming a failure. The review packet aligns manifest attempts to
 rollout attempts as an ordered subsequence, reports skipped rollout events, and
 requires the current pending event to match. Verify with three gates:
 run the complete suite (`python -S -m unittest discover -s
-learning-retrospective/tests -v`), repeat one harmless failing command twice,
-then run 12 rapid harmless distinct commands and confirm that no broad review appears.
+learning-retrospective/tests -v`), repeat one harmless failing command three
+times, then run 12 rapid harmless distinct commands and confirm that no broad
+review appears. With `codex_cli`, also repeat a harmless successful command
+three times and confirm the failure-outcome preflight remains silent.
 Use a test-only zero-span configuration to verify the sustained-activity
 boundary without waiting two minutes.
 

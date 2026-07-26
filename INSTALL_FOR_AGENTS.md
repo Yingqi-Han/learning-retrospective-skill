@@ -49,7 +49,7 @@ Goal: install the `learning-retrospective` skill from this repository into the u
 
 - Never register hooks by default. A hook runs local code on every future tool call.
 - If and only if the user explicitly asks for hooks: read `learning-retrospective/SECURITY_NOTES.md` and `learning-retrospective/references/hook-activation.md` first, show the user the exact config change before applying it, and remind them that Codex separately tracks enablement and trust. CLI/TUI builds may expose `/hooks`; Desktop builds use a Hooks settings panel whose controls vary by release. An enabled switch alone does not prove that the current hook hash is trusted.
-- Prefer `python install.py --agent codex --with-hooks` (or `--agent claude`) to copy the complete hook bundle transactionally. It stages and verifies files, activates the detector last, rolls back partial failures, preserves an existing active reviewer config, and still does not register or trust the hook.
+- Prefer `python install.py --agent codex --with-hooks` (or `--agent claude`) to copy the complete hook bundle transactionally. It stages and verifies files, writes immutable versioned executable names, activates the detector last, rolls back partial failures, preserves an existing active reviewer config, and still does not register or trust the hook. Never edit or overwrite a same-version executable in place; bump `VERSION` and update the registration path after review.
 
 ## Suggested user prompt
 

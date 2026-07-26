@@ -8,8 +8,11 @@ folder so it survives a folder-only install.
 ## Hooks
 
 - Never let an agent auto-install hooks without explicit user approval. Installing a hook changes what runs on every future tool call, in every future session.
-- Review a hook script before registering it, and re-review after any edit. Codex tracks enablement and trust separately: CLI/TUI builds may expose `/hooks`, while Desktop builds use a Hooks settings panel whose controls vary by release. An enabled switch alone does not prove that the current definition hash is trusted. On Claude Code, the settings file edit is itself the approval surface, so read the diff.
+- Review a hook script before registering it, and re-review after any edit. Codex tracks enablement and trust separately: CLI/TUI builds may expose `/hooks`, while Desktop builds use a Hooks settings panel whose controls vary by release. An enabled switch alone does not prove that the current definition hash is trusted. Current Codex source derives that identity from normalized hook configuration, not the script file's bytes, so overwriting code at an unchanged command path may retain the old trust status. The installer therefore uses immutable versioned executable names; an upgrade changes the registered path and requires a new trust decision. On Claude Code, the settings file edit is itself the approval surface, so read the diff.
 - Pin hooks to full interpreter and script paths. A hook that resolves its interpreter through PATH can be hijacked by anything that edits PATH.
+- Never edit an installed versioned hook executable in place. Review source,
+  bump `VERSION`, install the new bundle, update the registration path, and
+  retain the previous bundle only as an explicit rollback target.
 - Verify a hook with synthetic input and one live candidate before trusting it,
   and again after harness upgrades. On Codex, confirm `PreToolUse` observes both
   an eventual success and an eventual failure; the detector records attempts
@@ -37,6 +40,10 @@ folder so it survives a folder-only install.
   `known_loop` by itself. It reports failure-family similarity; the main agent
   must find and cite a source-labelled, still-applicable lesson before
   interruption.
+- Before the opt-in Codex backend starts a model, a deterministic preflight
+  must align the manifest to the parent rollout and prove at least two prior
+  failed outcomes. Repeated successes and failure-free activity are not sent
+  to a model and do not consume the model-call cooldown.
 - Redaction is defense in depth, not a proof that arbitrary logs are safe.
   The backend covers common API-key, token, password, cookie, authenticated-URL,
   JWT, AWS-key, GitHub-token, private-key, and segment-named environment

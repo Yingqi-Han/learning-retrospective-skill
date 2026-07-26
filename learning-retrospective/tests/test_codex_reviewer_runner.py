@@ -300,7 +300,9 @@ class CodexReviewerRunnerTest(unittest.TestCase):
         self.assertEqual(packet["tool_events"][-1]["outcome"], "pending")
         self.assertIsNone(packet["tool_events"][-1]["exit_code"])
 
-    def _real_shape_request(self, command, manifest_command, repeats=3):
+    def _real_shape_request(
+        self, command, manifest_command, repeats=3, prior_exit_code=1
+    ):
         """Request shaped like a real Codex build: the hook payload has no
         per-call workdir (the detector hashed the session cwd), while the
         rollout records each call's own workdir in a subdirectory."""
@@ -311,6 +313,7 @@ class CodexReviewerRunnerTest(unittest.TestCase):
         )
         manifest = {
             "request_id": "real-shape",
+            "candidate_reason": "exact_attempt_repeat",
             "events": [
                 {"command_signature": detector_signature}
             ] * repeats,
@@ -335,7 +338,10 @@ class CodexReviewerRunnerTest(unittest.TestCase):
                     "payload": {
                         "type": "function_call_output",
                         "call_id": f"call-{index}",
-                        "output": "Exit code: 1\nOutput:\nboom",
+                        "output": (
+                            f"Exit code: {prior_exit_code}\nOutput:\n"
+                            + ("ok" if prior_exit_code == 0 else "boom")
+                        ),
                     },
                 })
         return session_cwd, manifest, records
@@ -390,8 +396,45 @@ class CodexReviewerRunnerTest(unittest.TestCase):
             [event["outcome"] for event in packet["tool_events"]],
             ["failed", "failed", "pending"],
         )
+        self.assertEqual(packet["manifest_prior_failed_event_count"], 2)
+        self.assertEqual(
+            packet["manifest_prior_same_signature_failed_count"], 2
+        )
+        self.assertEqual(RUNNER.review_preflight(packet), "")
         for event in packet["tool_events"]:
             self.assertNotIn("signature_candidates", event)
+
+    def test_preflight_skips_repeated_successful_commands(self):
+        command = "python successful_probe.py"
+        session_cwd, manifest, records = self._real_shape_request(
+            command, command, prior_exit_code=0
+        )
+        packet = self._packet_from_rollout(
+            session_cwd, manifest, records, command
+        )
+        self.assertEqual(packet["manifest_prior_failed_event_count"], 0)
+        self.assertEqual(
+            RUNNER.review_preflight(packet),
+            "insufficient_prior_same_signature_failures",
+        )
+
+    def test_activity_preflight_requires_two_prior_failures(self):
+        packet = {
+            "parent_rollout_found": True,
+            "manifest_matches_event_sequence": True,
+            "manifest_current_event_matched": True,
+            "hook_manifest": {
+                "candidate_reason": "sustained_attempt_activity",
+            },
+            "manifest_prior_failed_event_count": 1,
+            "manifest_prior_same_signature_failed_count": 0,
+        }
+        self.assertEqual(
+            RUNNER.review_preflight(packet),
+            "insufficient_prior_failures",
+        )
+        packet["manifest_prior_failed_event_count"] = 2
+        self.assertEqual(RUNNER.review_preflight(packet), "")
 
     def test_cwd_tolerance_does_not_match_a_different_command(self):
         command = "python run.py"

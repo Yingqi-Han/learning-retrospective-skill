@@ -96,6 +96,28 @@ REQUIRED_INSTALL_FILES = {
 }
 
 
+def source_version():
+    return (SKILL_SRC / "VERSION").read_text(encoding="utf-8").strip()
+
+
+def versioned_hook_name(source_name, version=None):
+    """Return the immutable installed filename for executable hook code."""
+    version = version or source_version()
+    path = Path(source_name)
+    return f"{path.stem}-{version}{path.suffix}"
+
+
+def installed_hook_script(agent, version=None):
+    return versioned_hook_name(HOOK_SCRIPTS[agent], version)
+
+
+def installed_hook_support_files(agent, version=None):
+    return [
+        versioned_hook_name(name, version)
+        for name in HOOK_SUPPORT_FILES[agent]
+    ]
+
+
 def fail(msg):
     print(f"ERROR: {msg}")
     sys.exit(1)
@@ -119,10 +141,11 @@ def print_hook_config(agent):
     if agent == "project":
         fail("--print-hook-config needs --agent codex or --agent claude.")
     interpreter = sys.executable.replace("\\", "/")
-    script = (HOOK_DIRS[agent] / HOOK_SCRIPTS[agent]).as_posix()
+    script_name = installed_hook_script(agent)
+    script = (HOOK_DIRS[agent] / script_name).as_posix()
     if agent == "claude":
         entry = {"type": "command", "command": sys.executable,
-                 "args": ["-S", str(HOOK_DIRS[agent] / HOOK_SCRIPTS[agent])],
+                 "args": ["-S", str(HOOK_DIRS[agent] / script_name)],
                  "timeout": 5}
         snippet = {"hooks": {
             "PostToolUse": [{"matcher": "Bash", "hooks": [entry]}],
@@ -142,7 +165,7 @@ def print_hook_config(agent):
         )
     print(f"Proposed hook registration for {agent} - review, then merge manually into {target}:")
     print(json.dumps(snippet, indent=2))
-    if not (HOOK_DIRS[agent] / HOOK_SCRIPTS[agent]).is_file():
+    if not (HOOK_DIRS[agent] / script_name).is_file():
         print("NOTE: the hook script is not present at that path yet; "
               "run install.py with --with-hooks first, or copy it manually.")
     print("Nothing was written. See learning-retrospective/SECURITY_NOTES.md before registering.")
@@ -233,17 +256,21 @@ def hook_backup_root_for(agent):
 
 
 def install_hook_files(agent, hook_dir, backup_root, stamp):
-    """Stage, verify, and transactionally replace one harness's hook files."""
+    """Install one immutable, versioned hook bundle transactionally."""
     hook_dir = Path(hook_dir)
     backup_root = Path(backup_root)
+    version = source_version()
     staging = backup_root / f".learning-retrospective-hooks.staging-{stamp}-{os.getpid()}"
     backup = backup_root / f"learning-retrospective-hooks.bak-{stamp}"
     active_config = hook_dir / ACTIVE_REVIEW_CONFIG
     active_config_preserved = active_config.exists()
 
     pairs = []
+    immutable_targets = set()
     for source_name in HOOK_SUPPORT_FILES[agent]:
-        pairs.append((SKILL_SRC / "hooks" / source_name, hook_dir / source_name))
+        target = hook_dir / versioned_hook_name(source_name, version)
+        pairs.append((SKILL_SRC / "hooks" / source_name, target))
+        immutable_targets.add(target)
     pairs.append((
         SKILL_SRC / "hooks" / REVIEW_CONFIG_EXAMPLE,
         hook_dir / INSTALLED_REVIEW_CONFIG_EXAMPLE,
@@ -256,7 +283,9 @@ def install_hook_files(agent, hook_dir, backup_root, stamp):
     # Switch the detector last so an old detector never calls a half-updated
     # support bundle.
     script = HOOK_SCRIPTS[agent]
-    pairs.append((SKILL_SRC / "hooks" / script, hook_dir / script))
+    detector_target = hook_dir / versioned_hook_name(script, version)
+    pairs.append((SKILL_SRC / "hooks" / script, detector_target))
+    immutable_targets.add(detector_target)
 
     def expected_bytes(source):
         """Bytes that must land at the target, after any per-agent filtering."""
@@ -273,10 +302,29 @@ def install_hook_files(agent, hook_dir, backup_root, stamp):
 
     hook_dir.mkdir(parents=True, exist_ok=True)
     backup_root.mkdir(parents=True, exist_ok=True)
-    staging.mkdir()
     replaced = []
     backed_up = set()
     expected = {target: expected_bytes(source) for source, target in pairs}
+    for target in immutable_targets:
+        if target.exists() and target.read_bytes() != expected[target]:
+            raise RuntimeError(
+                "immutable versioned hook conflict: "
+                f"{target.name}; bump VERSION or inspect the local modification"
+            )
+
+    all_pairs = list(pairs)
+    # Identical immutable executables are already installed and must not be
+    # rewritten. Stable config examples remain updateable and are backed up.
+    pairs = [
+        (source, target)
+        for source, target in pairs
+        if not (
+            target in immutable_targets
+            and target.exists()
+            and target.read_bytes() == expected[target]
+        )
+    ]
+    staging.mkdir()
     try:
         for source, target in pairs:
             staged = staging / target.name
@@ -312,10 +360,15 @@ def install_hook_files(agent, hook_dir, backup_root, stamp):
         shutil.rmtree(staging, ignore_errors=True)
 
     return {
-        "targets": [target for _, target in pairs],
+        "targets": [target for _, target in all_pairs],
         "active_config": active_config,
         "active_config_preserved": active_config_preserved,
         "backup": backup if backup.exists() else None,
+        "detector": detector_target,
+        "support_files": [
+            hook_dir / name
+            for name in installed_hook_support_files(agent, version)
+        ],
     }
 
 
@@ -406,7 +459,7 @@ def main():
     else:
         print("Existing install: no")
     if args.with_hooks and args.agent != "project":
-        script = HOOK_SCRIPTS[args.agent]
+        script = installed_hook_script(args.agent, version)
         print(f"Hook script copy target: {HOOK_DIRS[args.agent] / script} (registration remains manual)")
         print("Reviewer config example target: "
               f"{HOOK_DIRS[args.agent] / INSTALLED_REVIEW_CONFIG_EXAMPLE}")
@@ -488,12 +541,14 @@ def main():
                 hook_backup_root_for(args.agent),
                 stamp,
             )
-            script = HOOK_SCRIPTS[args.agent]
+            script = installed_hook_script(args.agent, version)
             print(
                 f"Transactionally installed hook script to "
                 f"{hook_dir / script} (NOT registered)."
             )
-            for support_file in HOOK_SUPPORT_FILES[args.agent]:
+            for support_file in installed_hook_support_files(
+                args.agent, version
+            ):
                 print(f"Copied hook support file to {hook_dir / support_file}.")
             print("Copied optional reviewer config example to "
                   f"{hook_dir / INSTALLED_REVIEW_CONFIG_EXAMPLE}.")

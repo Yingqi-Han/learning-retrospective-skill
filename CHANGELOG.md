@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.8.9 - 2026-07-26
+
+- Serialize each Codex session's read/update/write state transaction with a
+  cross-process lock. A 20-process regression test now proves that event
+  indexes are not lost under concurrent hook invocations.
+- Raise exact-attempt review from the second to the third observation and
+  expire attempt evidence after 10 minutes by default.
+- Add a deterministic Codex CLI preflight that requires two aligned prior
+  failed outcomes before starting a model. Repeated successful commands and
+  broad activity without failures are recorded as privacy-safe diagnostics,
+  stay silent, and release their model-call cooldown reservation.
+- Install hook executables under immutable versioned filenames. A same-version
+  byte conflict now fails closed; a release upgrade changes the registered
+  command path so Codex presents a new trust decision instead of silently
+  reusing a config-derived identity for changed script bytes.
+- Pair a versioned Codex detector with the same-version reviewer automatically,
+  preserve the stable local reviewer configuration, and retain older bundles
+  for explicit rollback.
+- Expand the stdlib-only suite from 76 to 82 tests, including concurrency,
+  stale-window expiry, preflight skip, cooldown release, and immutable-install
+  coverage.
+
 ## 0.8.8 - 2026-07-26
 
 Post-review fixes to the 0.8.7 lifecycle change, found by adversarially

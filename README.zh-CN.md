@@ -11,9 +11,9 @@
 
 它适用于 Codex、Claude Code、Cursor、Cline、OpenCode，以及任何能加载 `SKILL.md` 式指令或纯 Markdown 指导的 agent 环境。
 
-![演示：第二次原样失败触发钩子注入提醒，agent 召回已存教训并改变方法](docs/demo.gif)
+![Claude Code 演示：第二次结构化失败触发钩子注入提醒，agent 召回已存教训并改变方法](docs/demo.gif)
 
-*实际钩子流程的风格化演示——横幅文字是检测器的真实输出：第二次原样失败 → 确定性提醒注入模型上下文 → 召回已存教训 → 改变方法而不是原样重试。*
+*这是 Claude Code 结构化失败流程的风格化演示；Codex 使用下文所述的尝试窗口与结果恢复流程。*
 
 ## 设计哲学
 
@@ -49,7 +49,7 @@ python install.py --agent project --target ./.agent-skills   # 项目级
 - `--print-hook-config` —— 打印含本机真实路径的钩子注册片段，不写任何文件。
 - `--dry-run` —— 预览安装器将要触碰的所有路径。
 
-想安装固定版本而不是最新 `main`，先切换到最新发布标签（`git tag --list` 查看，再如 `git checkout v0.8.8`）。
+想安装固定版本而不是最新 `main`，先切换到最新发布标签（`git tag --list` 查看，再如 `git checkout v0.8.9`）。
 
 Python 版本：CI 在 3.10-3.14（Linux/Windows/macOS）上实测；代码按检查保持 3.8 兼容，但 EOL 解释器不做 CI 测试。
 
@@ -114,9 +114,9 @@ python -S -m unittest discover -s learning-retrospective/tests -v
 
 钩子是会在以后每次工具调用时运行的本地可执行代码——安装前请阅读 `learning-retrospective/SECURITY_NOTES.md`，审查脚本内容，注册后用一次真实候选触发做实机验证。各 harness 的注册步骤见 `learning-retrospective/references/hook-activation.md`。
 
-检测器采用两层机制：Claude Code 等能够提供结构化失败事件的 harness 保留确定性的重复失败提醒；Codex 则改用 `PreToolUse`，因为它当前的 `PostToolUse` 不会覆盖失败工具。Codex 检测器在执行前只记录隐私安全的尝试签名；同一签名在最近 12 次尝试中第二次出现时请求审阅，再由审阅器从父任务真实记录中恢复此前的成功或失败结果。普通尝试窗口明显降频：默认要求至少 12 次调用、3 个命令签名并持续 120 秒，之后至少再等待 24 次调用和 15 分钟才允许下一次普通审阅。当前待执行事件明确标为 `pending`，钩子不会把“重复”直接说成“失败”。这些阈值可在本机配置。协议会分别标记“技术上禁用工具”“文件系统只读”和“仅靠提示词约束”，不会再把三者混为一谈。
+检测器采用两层机制：Claude Code 等能够提供结构化失败事件的 harness 保留确定性的重复失败提醒；Codex 则改用 `PreToolUse`，因为它当前的 `PostToolUse` 不会覆盖失败工具。Codex 检测器在执行前只记录隐私安全的尝试签名；同一签名在最近 12 次、10 分钟内第三次出现时才请求审阅。普通尝试窗口明显降频：默认要求至少 12 次调用、3 个命令签名并持续 120 秒，之后至少再等待 24 次调用和 15 分钟才允许下一次普通审阅。审阅器从父任务真实记录中恢复此前结果，当前待执行事件明确标为 `pending`。直接 `codex_cli` 后端只有在对齐结果证明至少存在两次既往失败时才启动模型；精确重复还要求这两次失败属于当前签名。重复成功探针和没有失败的活动窗口会静默跳过。这些阈值可在本机配置。协议会分别标记“技术上禁用工具”“文件系统只读”和“仅靠提示词约束”，不会再把三者混为一谈。
 
-公开默认值是 `review_backend: "main_agent"`，不会自行启动模型进程。Codex 用户可以在本机配置中显式启用 `review_backend: "codex_cli"`：该后端读取父任务有限长度的 JSONL 尾部，把钩子尝试与父任务尝试按有序子序列对齐，报告跳过的事件数量，并强制要求当前待执行尝试匹配；随后脱敏常见凭据形式，在临时 `CODEX_HOME` 中启动一个真实 Codex 子任务。模型调用前会关闭 shell、网页、浏览器和 MCP 类工具入口，同时启用 `--sandbox read-only` 和严格输出 schema，记录运行时 `thread_id`，再把验证后的结果直接注入主任务。临时 Home 仅在调用期间复制文件型 Codex 登录凭据，不继承用户 skills、hooks、rules 或 memory；Codex 内置系统上下文仍然存在。因此子任务只负责语义分流，例如判断是否属于同一失败家族，不会假装知道长期记忆。主代理随后执行一次有边界的经验检索，只有找到并引用仍适用、带来源的经验时，才能把结果升级为 `known_loop`。尝试窗口候选在每个冷却窗口（默认 15 分钟）内最多消耗一次自动模型调用；经过验证的 reviewer `reason` 字段会先压平、截断并标记为不可信文本再注入。启用前需把 Codex Hook 超时提高到 60 秒。`install.py --with-hooks` 会事务式复制该后端，并保留用户现有配置。详见 `learning-retrospective/references/semantic-review.md`。
+公开默认值是 `review_backend: "main_agent"`，不会自行启动模型进程。Codex 用户可以在本机配置中显式启用 `review_backend: "codex_cli"`：该后端读取父任务有限长度的 JSONL 尾部，把钩子尝试与父任务尝试按有序子序列对齐，报告跳过的事件数量，并强制要求当前待执行尝试匹配；随后脱敏常见凭据形式，在临时 `CODEX_HOME` 中启动一个真实 Codex 子任务。模型调用前会关闭 shell、网页、浏览器和 MCP 类工具入口，同时启用 `--sandbox read-only` 和严格输出 schema，记录运行时 `thread_id`，再把验证后的结果直接注入主任务。临时 Home 仅在调用期间复制文件型 Codex 登录凭据，不继承用户 skills、hooks、rules 或 memory；Codex 内置系统上下文仍然存在。因此子任务只负责语义分流，例如判断是否属于同一失败家族，不会假装知道长期记忆。主代理随后执行一次有边界的经验检索，只有找到并引用仍适用、带来源的经验时，才能把结果升级为 `known_loop`。尝试窗口候选在每个冷却窗口（默认 15 分钟）内最多消耗一次真实模型调用，纯证据预检跳过不占用冷却。经过验证的 reviewer `reason` 字段会先压平、截断并标记为不可信文本再注入。启用前需把 Codex Hook 超时提高到 60 秒。`install.py --with-hooks` 会写入不可变的版本化可执行文件，保留用户稳定的活动配置，并且绝不自动注册或信任 Hook。详见 `learning-retrospective/references/semantic-review.md`。
 
 ## 兼容性
 

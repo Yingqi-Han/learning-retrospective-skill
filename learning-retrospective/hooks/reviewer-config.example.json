@@ -8,5 +8,6 @@
   "activity_review_calls": 12,
   "activity_review_min_span_seconds": 120,
   "activity_review_cooldown_calls": 24,
-  "activity_review_cooldown_seconds": 900
+  "activity_review_cooldown_seconds": 900,
+  "attempt_window_max_age_seconds": 600
 }

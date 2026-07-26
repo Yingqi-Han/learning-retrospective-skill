@@ -71,11 +71,12 @@ Codex users may explicitly opt into a real isolated child:
   "activity_review_calls": 12,
   "activity_review_min_span_seconds": 120,
   "activity_review_cooldown_calls": 24,
-  "activity_review_cooldown_seconds": 900
+  "activity_review_cooldown_seconds": 900,
+  "attempt_window_max_age_seconds": 600
 }
 ```
 
-`retry-reviewer-codex-cli.py` then:
+The installed, same-version `retry-reviewer-codex-cli-<version>.py` then:
 
 1. Locates the persisted parent rollout by session id and reads at most the
    latest 4 MiB.
@@ -83,15 +84,20 @@ Codex users may explicitly opt into a real isolated child:
    rollout as an ordered subsequence, and copies at most 16 events after
    redacting common credential shapes. It reports skipped rollout events and
    requires the current pending attempt to match.
-3. Creates a temporary `CODEX_HOME`, copies file-based authentication only for
+3. Runs a deterministic preflight before any model call. Exact-repeat
+   candidates require two prior failed events with the same signature; broad
+   activity requires two prior failed events. Missing alignment, repeated
+   successes, and failure-free activity stay silent and do not consume the
+   model-call cooldown.
+4. Creates a temporary `CODEX_HOME`, copies file-based authentication only for
    the duration of the call, and excludes user skills, hooks, rules, and memory.
    Codex built-in system instructions and system skills still exist.
-4. Starts one Codex CLI child with `--sandbox read-only`,
+5. Starts one Codex CLI child with `--sandbox read-only`,
    `--ignore-user-config`, `--ignore-rules`, strict config/schema validation,
    disabled shell/web/browser/MCP-style tool features, and an empty temporary
    cwd. A CLI version that does not recognize the required controls fails
    closed.
-5. Rejects any unexpected child tool trace, validates the JSON result, captures
+6. Rejects any unexpected child tool trace, validates the JSON result, captures
    the actual runtime `thread_id`, and injects the result directly into the
    parent.
 
