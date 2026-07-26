@@ -86,9 +86,11 @@ redacted packet to the configured model and may add several seconds of latency,
 so review `SECURITY_NOTES.md`, set the hook timeout to 60 seconds, and test one
 harmless candidate before relying on it.
 
-## Claude Code Example (tested 2026-07-09)
+## Claude Code Example (tested 2026-07-09, re-verified 2026-07-26)
 
 This design was deployed and verified end-to-end on a real machine: on the second identical Bash failure, the reminder was injected into the model's context as a system reminder.
+
+This detector receives structured failure status from `PostToolUseFailure`, so it has no activity window and no direct model backend. Only `preferred_model`, `reasoning_effort`, and `confidence_threshold` are read from the local reviewer config; `review_backend`, `codex_cli_path`, and the `activity_review_*` keys belong to the Codex detector and are ignored here. Setting one of them records a `reviewer_config_keys_unsupported` diagnostic rather than silently doing nothing, and `install.py --agent claude --with-hooks` writes only the supported keys.
 
 Two verified facts shaped the design:
 

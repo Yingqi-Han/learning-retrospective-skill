@@ -508,6 +508,29 @@ class CodexReviewerRunnerTest(unittest.TestCase):
         self.assertLessEqual(len(result["reason"]), RUNNER.MAX_REASON_CHARS)
         self.assertNotIn("\n", result["reason"])
 
+    def test_redaction_stays_linear_on_a_long_unbroken_run(self):
+        # An unbounded name-prefix repeat made this quadratic: 20 KiB of
+        # base64 cost ~22s, and a 4 MiB rollout tail can contain such a run.
+        started = time.monotonic()
+        RUNNER.redact("A" * (4 * 1024 * 1024), 600)
+        self.assertLess(time.monotonic() - started, 5)
+
+    def test_private_key_without_end_marker_is_fully_contained(self):
+        armored = (
+            "-----BEGIN RSA PRIVATE KEY-----\n"
+            "MIIEsecretkeybodyAAAA\n"
+            "trailing context that must not survive"
+        )
+        redacted = RUNNER.redact(armored, 600)
+        self.assertNotIn("MIIEsecretkeybody", redacted)
+        self.assertNotIn("trailing context", redacted)
+        self.assertIn("<redacted-private-key>", redacted)
+
+    def test_redaction_precedes_truncation_for_a_late_secret(self):
+        text = "x" * (RUNNER.MAX_TEXT - 20) + " password=hunter2trailing"
+        redacted = RUNNER.redact(text, RUNNER.MAX_TEXT)
+        self.assertNotIn("hunter2trailing", redacted)
+
     def test_reviewer_temp_parent_sweeps_stale_review_dirs(self):
         with tempfile.TemporaryDirectory() as directory:
             codex_home = Path(directory) / "codex"

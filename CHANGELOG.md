@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.8.3 - 2026-07-26
+
+Second hardening pass, from an adversarial self-review of 0.8.2 plus an audit
+of surfaces the first review had not covered.
+
+- Fix quadratic redaction cost: the credential-name pattern used an unbounded
+  `[A-Za-z0-9_.:/-]*` prefix, so one unbroken run cost O(n^2) — measured 3.5s
+  at 8 KiB and 22s at 20 KiB, on text drawn from a 4 MiB rollout tail. The
+  name prefix/suffix repeats are now bounded to 64 characters and input is
+  pre-cut to 20000 characters before matching (every caller keeps at most
+  2000, so no surviving content changes). 4 MiB now redacts in ~0.15s. This
+  bug predates 0.8.2; the first review flagged redaction coverage but not its
+  cost.
+- Contain an armored private key that has no END marker (truncated tail, or a
+  body longer than the pre-cut): the pattern now consumes the rest of the text
+  rather than leaving the key body visible.
+- Enforce the isolated backend's contract inside the detector, not only in the
+  runner: classification/action enums, confidence range, literal booleans,
+  and — because that backend has no persistent-memory access — a hard refusal
+  of any result claiming `prior_lesson_verified` or `should_interrupt`. The
+  runner is a separate file that can be stale or swapped independently, so
+  interrupt-unreachability no longer depends on it.
+- Rotate the diagnostics file in place at the 1 MiB cap instead of going
+  permanently silent, so a long-running hook stays debuggable.
+- Stop advertising knobs a harness cannot honor: `install.py --agent claude
+  --with-hooks` now writes only `preferred_model`, `reasoning_effort`, and
+  `confidence_threshold`, and the Claude detector records a
+  `reviewer_config_keys_unsupported` diagnostic when it finds Codex-only keys
+  such as `review_backend` or `activity_review_*` in a hand-edited config.
+  Previously a Claude Code user could set `review_backend: "codex_cli"` and
+  get a silent no-op.
+- Finish threading the parsed reviewer config through the Codex detector
+  (0.8.2 reduced three config reads per event to two; now one) and use the
+  `MAX_GOAL_TEXT` constant instead of a duplicated literal.
+- Refresh verification dates: the Claude Code skill and hook were re-verified
+  live on Windows 11 on 2026-07-26 against this release.
+- Tests: redaction linearity on a 4 MiB run, PEM-without-END containment,
+  redact-before-truncate ordering, both detector-side interrupt refusals via
+  hostile stub runners, diagnostics rotation, and per-agent config filtering.
+  Suite: 70 tests.
+
 ## 0.8.2 - 2026-07-26
 
 Hardening release after an adversarial code review of the 0.8.x reviewer

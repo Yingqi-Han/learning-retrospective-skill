@@ -49,11 +49,20 @@ def append_diagnostic(kind, **fields):
         flags |= getattr(os, "O_NOFOLLOW", 0)
         fd = os.open(path, flags, 0o600)
         try:
-            if os.fstat(fd).st_size <= MAX_DIAGNOSTIC_BYTES:
-                os.write(
-                    fd,
-                    (json.dumps(record, sort_keys=True) + "\n").encode("utf-8"),
-                )
+            line = json.dumps(record, sort_keys=True) + "\n"
+            if os.fstat(fd).st_size > MAX_DIAGNOSTIC_BYTES:
+                # Rotate in place rather than going permanently silent: a hook
+                # that stops recording once it crosses the cap is undebuggable
+                # exactly when it has been running long enough to matter.
+                os.ftruncate(fd, 0)
+                line = json.dumps(
+                    {
+                        "timestamp": record["timestamp"],
+                        "kind": "diagnostics_rotated",
+                    },
+                    sort_keys=True,
+                ) + "\n" + line
+            os.write(fd, line.encode("utf-8"))
         finally:
             os.close(fd)
     except Exception:
@@ -183,6 +192,13 @@ def update_semantic_window(state, key, failed):
     }
 
 
+SUPPORTED_CONFIG_KEYS = {
+    "preferred_model",
+    "reasoning_effort",
+    "confidence_threshold",
+}
+
+
 def load_reviewer_preferences():
     """Load optional local reviewer preferences; never require a model vendor."""
     path = os.environ.get(REVIEW_CONFIG_PATH_ENV) or os.path.join(
@@ -195,6 +211,14 @@ def load_reviewer_preferences():
         config = {}
     if not isinstance(config, dict):
         config = {}
+
+    # This detector gets structured failure status from PostToolUseFailure, so
+    # it has no activity window and no direct model backend. Record which keys
+    # a user set that this harness cannot honor, instead of ignoring them
+    # silently and letting them debug a knob that was never wired up.
+    unsupported = sorted(set(config) - SUPPORTED_CONFIG_KEYS)
+    if unsupported:
+        append_diagnostic("reviewer_config_keys_unsupported", keys=unsupported)
 
     model = config.get("preferred_model", "")
     if not isinstance(model, str) or not all(

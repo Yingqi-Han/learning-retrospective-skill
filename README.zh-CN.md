@@ -21,7 +21,7 @@
 - 只捕获已验证、可复用的教训。
 - 把教训写入正确的层级：用户级记忆、项目级记忆或技能更新。
 - 可选地请任意可用的快速第二审阅者区分“已知循环”和“持续产生新证据的合理探索”。
-- 可选地通过 harness 钩子（hook）自动激活：检测到重复失败时注入提醒（见 `learning-retrospective/references/hook-activation.md`；其中 Claude Code 检测器已于 2026-07-09 实机部署并验证）。
+- 可选地通过 harness 钩子（hook）自动激活：检测到重复失败时注入提醒（见 `learning-retrospective/references/hook-activation.md`；其中 Claude Code 检测器已实机部署并验证，最近一次为 2026-07-26）。
 
 ## 快速开始
 
@@ -42,7 +42,7 @@ python install.py --agent project --target ./.agent-skills   # 项目级
 - `--print-hook-config` —— 打印含本机真实路径的钩子注册片段，不写任何文件。
 - `--dry-run` —— 预览安装器将要触碰的所有路径。
 
-想安装固定版本而不是最新 `main`，先切换到最新发布标签（`git tag --list` 查看，再如 `git checkout v0.8.2`）。
+想安装固定版本而不是最新 `main`，先切换到最新发布标签（`git tag --list` 查看，再如 `git checkout v0.8.3`）。
 
 Python 版本：CI 在 3.10-3.14（Linux/Windows/macOS）上实测；代码按检查保持 3.8 兼容，但 EOL 解释器不做 CI 测试。
 
@@ -116,7 +116,7 @@ python -S -m unittest discover -s learning-retrospective/tests -v
 | Agent | 测试状态 | 安装位置 | 说明 |
 |---|---:|---|---|
 | Codex | 已验证：结构校验 + 子代理实测（Windows 11；2026-07-24 使用可选快速审阅模型复测语义分类） | `~/.codex/skills/` | 使用 `SKILL.md` frontmatter 和可选的 `agents/openai.yaml`；为兼容 Windows 校验器请保持 `SKILL.md` 纯 ASCII。钩子字段形状是经验观察，升级或修改后需要重测并重新信任。 |
-| Claude Code | 已验证：部署并被发现（Windows 11，2026-07-09） | `~/.claude/skills/` | 复制文件夹即可；技能从 `SKILL.md` frontmatter 实时发现，无需重启。`agents/openai.yaml` 会被忽略。基于钩子的自动激活同日实机验证——见 `references/hook-activation.md`。 |
+| Claude Code | 已验证：部署并被发现（Windows 11，2026-07-26 复测） | `~/.claude/skills/` | 复制文件夹即可；技能从 `SKILL.md` frontmatter 实时发现，无需重启。`agents/openai.yaml` 会被忽略。基于钩子的自动激活同日实机复测——见 `references/hook-activation.md`。此侧仅 `preferred_model`、`reasoning_effort`、`confidence_threshold` 生效；活动窗口与 `codex_cli` 相关键仅 Codex 检测器读取。 |
 | Cursor | 尚未测试 | rules 或自定义指令 | 粘贴 `SKILL.md`；需要时手动加载 references。 |
 | Cline | 尚未测试 | `.clinerules` 或 memory bank | 若不支持技能文件夹，可作为纯 Markdown 工作流指导使用。 |
 | OpenCode | 尚未测试 | 自定义技能或指令目录 | 若支持，用同样的 `SKILL.md` + references 模式。 |

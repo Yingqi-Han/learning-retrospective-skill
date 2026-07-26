@@ -65,11 +65,20 @@ def append_diagnostic(kind, **fields):
         flags |= getattr(os, "O_NOFOLLOW", 0)
         fd = os.open(path, flags, 0o600)
         try:
-            if os.fstat(fd).st_size <= MAX_DIAGNOSTIC_BYTES:
-                os.write(
-                    fd,
-                    (json.dumps(record, sort_keys=True) + "\n").encode("utf-8"),
-                )
+            line = json.dumps(record, sort_keys=True) + "\n"
+            if os.fstat(fd).st_size > MAX_DIAGNOSTIC_BYTES:
+                # Rotate in place rather than going permanently silent: a hook
+                # that stops recording once it crosses the cap is undebuggable
+                # exactly when it has been running long enough to matter.
+                os.ftruncate(fd, 0)
+                line = json.dumps(
+                    {
+                        "timestamp": record["timestamp"],
+                        "kind": "diagnostics_rotated",
+                    },
+                    sort_keys=True,
+                ) + "\n" + line
+            os.write(fd, line.encode("utf-8"))
         finally:
             os.close(fd)
     except Exception:
@@ -397,14 +406,59 @@ def load_reviewer_config():
     }
 
 
-def load_reviewer_preferences():
+def load_reviewer_preferences(config=None):
     """Return the vendor-neutral preferences used in injected context."""
-    config = load_reviewer_config()
+    if config is None:
+        config = load_reviewer_config()
     return (
         config["preferred_model"],
         config["reasoning_effort"],
         config["confidence_threshold"],
     )
+
+
+REVIEW_CLASSIFICATIONS = {
+    "known_loop",
+    "novel_exploration",
+    "routine_failure",
+    "uncertain",
+}
+REVIEW_ACTIONS = {"recall_lesson", "change_hypothesis", "continue", "ask_user"}
+
+
+def automated_review_violation(review):
+    """Re-check the isolated backend's contract inside the detector.
+
+    The runner validates its own child, but it is a separate file that can be
+    stale or replaced independently of this detector. Because the isolated
+    backend has no persistent-memory access, it can never verify a prior
+    lesson, so it can never justify a known loop or an interrupt. Enforcing
+    that here keeps interrupt-unreachability true even under version skew.
+    """
+    if review.get("classification") not in REVIEW_CLASSIFICATIONS:
+        return "review_classification_invalid"
+    if review.get("recommended_action") not in REVIEW_ACTIONS:
+        return "review_action_invalid"
+    confidence = review.get("confidence")
+    if (
+        not isinstance(confidence, (int, float))
+        or isinstance(confidence, bool)
+        or not 0 <= confidence <= 1
+    ):
+        return "review_confidence_invalid"
+    for field in (
+        "same_failure_family",
+        "prior_lesson_verified",
+        "evidence_adequate",
+        "should_interrupt",
+    ):
+        if not isinstance(review.get(field), bool):
+            return "review_" + field + "_invalid"
+    if review["prior_lesson_verified"]:
+        return "review_claimed_lesson_without_memory_access"
+    if review["should_interrupt"] or review["classification"] == "known_loop":
+        return "review_claimed_interrupt_without_memory_access"
+    return ""
 
 
 def run_automated_review(manifest, hook_payload, config=None):
@@ -465,6 +519,9 @@ def run_automated_review(manifest, hook_payload, config=None):
     reviewer_id = review.get("reviewer_agent_id")
     if not isinstance(reviewer_id, str) or not reviewer_id:
         return None, "reviewer_agent_id_missing"
+    violation = automated_review_violation(review)
+    if violation:
+        return None, violation
     # Defense in depth: the runner already bounds the reason, but never let
     # unbounded or multi-line reviewer text into the injected context.
     reason_text = review.get("reason")
@@ -520,9 +577,9 @@ def build_evidence_manifest(signal, session_key):
     }
 
 
-def semantic_review_context(signal, manifest):
+def semantic_review_context(signal, manifest, config=None):
     """Build a vendor-neutral, evidence-bound subagent review request."""
-    model, effort, threshold = load_reviewer_preferences()
+    model, effort, threshold = load_reviewer_preferences(config)
     reviewer = (
         f"Prefer reviewer model {model} at {effort} reasoning. "
         if model
@@ -867,7 +924,7 @@ if exact_reminder or semantic_candidate:
         else:
             system_messages.append("semantic review requested")
             manual_context = semantic_review_context(
-                semantic_signal, semantic_manifest
+                semantic_signal, semantic_manifest, review_config
             )
             if automated_review_error:
                 manual_context = (

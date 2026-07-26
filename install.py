@@ -61,6 +61,15 @@ HOOK_SUPPORT_FILES = {
 REVIEW_CONFIG_EXAMPLE = "reviewer-config.example.json"
 INSTALLED_REVIEW_CONFIG_EXAMPLE = "learning-retrospective-reviewer.example.json"
 ACTIVE_REVIEW_CONFIG = "learning-retrospective-reviewer.json"
+# The Claude Code detector reads only these keys: it gets structured failure
+# status from PostToolUseFailure, so it has no activity window and no direct
+# model backend. Shipping the full Codex config there would advertise knobs
+# that silently do nothing.
+CLAUDE_REVIEW_CONFIG_KEYS = (
+    "preferred_model",
+    "reasoning_effort",
+    "confidence_threshold",
+)
 
 # Keep in sync with references/localization.md.
 LOCALE_ADDENDA = {
@@ -249,16 +258,33 @@ def install_hook_files(agent, hook_dir, backup_root, stamp):
     script = HOOK_SCRIPTS[agent]
     pairs.append((SKILL_SRC / "hooks" / script, hook_dir / script))
 
+    def expected_bytes(source):
+        """Bytes that must land at the target, after any per-agent filtering."""
+        data = source.read_bytes()
+        if agent == "claude" and source.name == REVIEW_CONFIG_EXAMPLE:
+            config = json.loads(data.decode("utf-8"))
+            filtered = {
+                key: config[key]
+                for key in CLAUDE_REVIEW_CONFIG_KEYS
+                if key in config
+            }
+            data = (json.dumps(filtered, indent=2) + "\n").encode("utf-8")
+        return data
+
     hook_dir.mkdir(parents=True, exist_ok=True)
     backup_root.mkdir(parents=True, exist_ok=True)
     staging.mkdir()
     replaced = []
     backed_up = set()
+    expected = {target: expected_bytes(source) for source, target in pairs}
     try:
         for source, target in pairs:
             staged = staging / target.name
-            shutil.copy2(source, staged)
-            if staged.read_bytes() != source.read_bytes():
+            if expected[target] == source.read_bytes():
+                shutil.copy2(source, staged)
+            else:
+                staged.write_bytes(expected[target])
+            if staged.read_bytes() != expected[target]:
                 raise RuntimeError(f"staged hook verification failed: {target.name}")
 
         existing = [target for _, target in pairs if target.exists()]
@@ -272,7 +298,7 @@ def install_hook_files(agent, hook_dir, backup_root, stamp):
             staged = staging / target.name
             os.replace(str(staged), str(target))
             replaced.append(target)
-            if target.read_bytes() != source.read_bytes():
+            if target.read_bytes() != expected[target]:
                 raise RuntimeError(f"activated hook verification failed: {target.name}")
     except Exception:
         for target in reversed(replaced):

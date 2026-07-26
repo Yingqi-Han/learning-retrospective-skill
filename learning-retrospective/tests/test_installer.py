@@ -1,5 +1,6 @@
 """Tests for transactional hook installation."""
 import importlib.util
+import json
 import os
 import tempfile
 import unittest
@@ -34,6 +35,50 @@ class HookInstallerTest(unittest.TestCase):
             for target in result["targets"]:
                 self.assertTrue(target.is_file())
             self.assertNotIn(active, result["targets"])
+
+    def test_claude_config_omits_keys_that_detector_cannot_honor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            hook_dir = root / "hooks"
+            hook_dir.mkdir()
+
+            INSTALLER.install_hook_files(
+                "claude", hook_dir, root / "backups", "test-claude-config"
+            )
+
+            for name in (
+                INSTALLER.ACTIVE_REVIEW_CONFIG,
+                INSTALLER.INSTALLED_REVIEW_CONFIG_EXAMPLE,
+            ):
+                config = json.loads(
+                    (hook_dir / name).read_text(encoding="utf-8")
+                )
+                self.assertEqual(
+                    sorted(config),
+                    sorted(INSTALLER.CLAUDE_REVIEW_CONFIG_KEYS),
+                    f"{name} must not advertise Codex-only knobs",
+                )
+
+    def test_codex_config_keeps_every_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            hook_dir = root / "hooks"
+            hook_dir.mkdir()
+
+            INSTALLER.install_hook_files(
+                "codex", hook_dir, root / "backups", "test-codex-config"
+            )
+
+            source = json.loads(
+                (INSTALLER.SKILL_SRC / "hooks" / INSTALLER.REVIEW_CONFIG_EXAMPLE)
+                .read_text(encoding="utf-8")
+            )
+            installed = json.loads(
+                (hook_dir / INSTALLER.ACTIVE_REVIEW_CONFIG)
+                .read_text(encoding="utf-8")
+            )
+            self.assertEqual(installed, source)
+            self.assertIn("review_backend", installed)
 
     def test_hook_install_rolls_back_partial_replacement(self):
         with tempfile.TemporaryDirectory() as directory:

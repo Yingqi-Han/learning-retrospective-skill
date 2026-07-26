@@ -24,6 +24,11 @@ MAX_TRANSCRIPT_BYTES = 4 * 1024 * 1024
 MAX_EVENTS = 12
 MAX_TEXT = 600
 MAX_REASON_CHARS = 300
+# Bound the text handed to the redaction patterns. Every caller keeps at most
+# MAX_GOAL_TEXT characters, so cutting far above that costs no visible content
+# while keeping regex work linear on a multi-megabyte rollout tail.
+PRE_REDACT_CHARS = 20000
+MAX_GOAL_TEXT = 2000
 MAX_REVIEW_TIMEOUT_SECONDS = 45
 STALE_REVIEW_DIR_SECONDS = 60 * 60
 CONFIG_FILE = "learning-retrospective-reviewer.json"
@@ -63,8 +68,10 @@ ACTIONS = {"recall_lesson", "change_hypothesis", "continue", "ask_user"}
 SECRET_SUBSTITUTIONS = (
     (
         re.compile(
-            r"(?is)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?"
-            r"-----END [A-Z0-9 ]*PRIVATE KEY-----"
+            # An armored key with no END (truncated tail, or a body longer than
+            # PRE_REDACT_CHARS) must still take the rest of the text with it.
+            r"(?is)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"
+            r"(?:.*?-----END [A-Z0-9 ]*PRIVATE KEY-----|.*)"
         ),
         "<redacted-private-key>",
     ),
@@ -92,9 +99,13 @@ SECRET_SUBSTITUTIONS = (
     ),
     (
         re.compile(
-            r"(?i)([\"']?[A-Za-z0-9_.:/-]*(?:api[_-]?key|auth[_-]?token|"
+            # The name-prefix/suffix repeats are bounded: an unbounded
+            # [A-Za-z0-9_.:/-]* here made redaction quadratic in the length of
+            # an unbroken run (8 KiB of base64 cost ~3.5s, 20 KiB ~22s), which
+            # a 4 MiB rollout tail can easily contain.
+            r"(?i)([\"']?[A-Za-z0-9_.:/-]{0,64}(?:api[_-]?key|auth[_-]?token|"
             r"access[_-]?token|refresh[_-]?token|id[_-]?token|token|password|"
-            r"passwd|secret|authorization|cookie)[A-Za-z0-9_.:/-]*[\"']?"
+            r"passwd|secret|authorization|cookie)[A-Za-z0-9_.:/-]{0,64}[\"']?"
             r"\s*[:=]\s*)[^\s,;]+"
         ),
         r"\1<redacted>",
@@ -133,8 +144,16 @@ class ReviewRunnerError(RuntimeError):
 
 
 def redact(value, limit=MAX_TEXT):
-    """Redact common credential shapes and bound text passed to the reviewer."""
+    """Redact common credential shapes and bound text passed to the reviewer.
+
+    Redaction runs before the final truncation so a secret is never exposed by
+    a cut that breaks its pattern. The input is pre-cut to PRE_REDACT_CHARS
+    first: that keeps regex cost linear, and because every limit is far below
+    the pre-cut, no content that would have survived truncation is affected.
+    """
     text = str(value or "").replace("\x00", "")
+    if len(text) > PRE_REDACT_CHARS:
+        text = text[:PRE_REDACT_CHARS]
     for pattern, replacement in SECRET_SUBSTITUTIONS:
         text = pattern.sub(replacement, text)
     if len(text) > limit:
@@ -342,7 +361,7 @@ def extract_rollout_evidence(path):
                         response_output_text(item.get("output"))
                     ),
                 })
-    return redact(latest_goal, 2000), events[-MAX_EVENTS:]
+    return redact(latest_goal, MAX_GOAL_TEXT), events[-MAX_EVENTS:]
 
 
 def build_review_packet(request):

@@ -21,7 +21,7 @@ Failure is not error — repeated attempts on a novel problem are legitimate exp
 - Capture only verified, reusable lessons.
 - Route lessons to user memory, project memory, or skill updates.
 - Optionally ask any available fast secondary reviewer to distinguish a known loop from evidence-producing novel exploration.
-- Optionally activate automatically via harness hooks that detect repeated failures (see `learning-retrospective/references/hook-activation.md`; the Claude Code detector there is deployed and verified live, 2026-07-09).
+- Optionally activate automatically via harness hooks that detect repeated failures (see `learning-retrospective/references/hook-activation.md`; the Claude Code detector there is deployed and verified live, most recently 2026-07-26).
 
 ## Quick Start
 
@@ -42,7 +42,7 @@ Useful flags:
 - `--print-hook-config` — print the hook registration snippet with resolved local paths; writes nothing.
 - `--dry-run` — preview every path the installer would touch.
 
-To install a fixed version instead of latest `main`, check out the latest release tag first (`git tag --list`, then e.g. `git checkout v0.8.2`).
+To install a fixed version instead of latest `main`, check out the latest release tag first (`git tag --list`, then e.g. `git checkout v0.8.3`).
 
 Python: CI-tested on 3.10-3.14 (Linux/Windows/macOS); the code is kept 3.8-compatible by inspection, but EOL interpreters are not CI-tested.
 
@@ -116,7 +116,7 @@ The public default is `review_backend: "main_agent"` and never starts a model pr
 | Agent | Tested | Install surface | Notes |
 |---|---:|---|---|
 | Codex | yes, structure validated and subagent-tested (Windows 11; semantic classifier re-tested with an optional fast reviewer, 2026-07-24) | `~/.codex/skills/` | Uses `SKILL.md` frontmatter and optional `agents/openai.yaml`; keep `SKILL.md` ASCII-only for Windows validator compatibility. Hook field shapes are empirical; re-test and re-trust after upgrades or edits. |
-| Claude Code | yes, deployed and discovered (Windows 11, 2026-07-09) | `~/.claude/skills/` | Copy the folder; the skill is discovered live from `SKILL.md` frontmatter, no restart needed. `agents/openai.yaml` is ignored. Hook-based auto-activation verified live same date — see `references/hook-activation.md`. |
+| Claude Code | yes, deployed and discovered (Windows 11, re-verified 2026-07-26) | `~/.claude/skills/` | Copy the folder; the skill is discovered live from `SKILL.md` frontmatter, no restart needed. `agents/openai.yaml` is ignored. Hook-based auto-activation re-verified live on the same date — see `references/hook-activation.md`. Only `preferred_model`, `reasoning_effort`, and `confidence_threshold` apply here; the activity-window and `codex_cli` keys are Codex-detector-only. |
 | Cursor | not yet | rules or custom instructions | Paste `SKILL.md`; load references manually as needed. |
 | Cline | not yet | `.clinerules` or memory bank | Use as plain Markdown workflow guidance if skill folders are unavailable. |
 | OpenCode | not yet | custom skill or instruction folder | Use the same `SKILL.md` plus references pattern if supported. |
