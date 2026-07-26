@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.8.5 - 2026-07-26
+
+Redundancy cleanup; no behavior changes.
+
+- Remove `references/github-landscape.md`: it was referenced by nothing and
+  duplicated the README's positioning section. Installed manifest is now 32
+  files.
+- Deduplicate the semantic-review output schema: `reviewer-prompt.md` restated
+  the JSON schema that `semantic-review.md` and the detector's injected text
+  define; the restatement is replaced with a pointer to the canonical
+  definition, so schema changes no longer need a third hand-synced copy.
+- Link `references/failure-gates.md` from the SKILL.md workflow step that
+  introduces failure gates; the file had useful worked examples but nothing
+  pointed to it.
+- Guard the deliberate SECURITY_NOTES.md duplication (repo root for GitHub
+  visibility, skill folder for self-containment) with a byte-identity test.
+- Tests: 73.
+
 ## 0.8.4 - 2026-07-26
 
 Fixes a manifest-matching defect found by an independent cross-check (Codex)

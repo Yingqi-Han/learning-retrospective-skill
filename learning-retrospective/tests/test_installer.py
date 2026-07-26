@@ -36,6 +36,18 @@ class HookInstallerTest(unittest.TestCase):
                 self.assertTrue(target.is_file())
             self.assertNotIn(active, result["targets"])
 
+    def test_security_notes_copies_are_identical(self):
+        # Both copies are deliberate: the repo root for GitHub visibility, the
+        # skill folder for self-containment of the installed artifact. This
+        # guard turns silent drift between them into a test failure.
+        root = TESTS_DIR.parents[1] / "SECURITY_NOTES.md"
+        skill = TESTS_DIR.parents[0] / "SECURITY_NOTES.md"
+        self.assertEqual(
+            root.read_bytes(), skill.read_bytes(),
+            "SECURITY_NOTES.md at repo root and in the skill folder must be "
+            "byte-identical; edit both together",
+        )
+
     def test_claude_config_omits_keys_that_detector_cannot_honor(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

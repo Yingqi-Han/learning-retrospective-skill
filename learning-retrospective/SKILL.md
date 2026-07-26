@@ -70,7 +70,7 @@ Before writing to user memory, repository docs, project rules, or another skill:
 
 3. Choose one next hypothesis.
    - Pick the smallest command or edit that directly tests the leading hypothesis.
-   - Add a failure gate: define what result means success, what result means stop, and what fallback is allowed.
+   - Add a failure gate: define what result means success, what result means stop, and what fallback is allowed. See `references/failure-gates.md` for the template and worked examples.
    - Avoid falling through into unrelated fallback discovery when the gate fails.
 
 4. Complete the user task first.
